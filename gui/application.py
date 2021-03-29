@@ -18,6 +18,7 @@ class Application:
 
         print("Closed application")
 
+
 if __name__ == '__main__':
     application = Application()
     application.run()

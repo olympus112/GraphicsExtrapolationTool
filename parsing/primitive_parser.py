@@ -1,13 +1,15 @@
 from typing import Union, Sequence
 
-from gui.primitives import Primitive, Line, Rect, Circle
+from gui.primitives import *
 from parsing.primitive_lexer import Lexer
 
 class Parser:
     @staticmethod
     def create_primitive(name: str, arity: int, parameters: [Union[str, float, int]]):
-        for primitive in [Line, Rect, Circle]:
+        for primitive in [Line, Rect, Circle, Vector]:
             if name == primitive.static_name():
+                if arity not in primitive.static_arity():
+                    return None
                 return primitive(arity, *parameters)
 
         return Primitive(name, arity, *parameters)

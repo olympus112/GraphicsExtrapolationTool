@@ -1,5 +1,6 @@
 from gui import util
 from gui.graphics import Point, Bounds
+import math
 import imgui
 
 class Primitive:
@@ -35,7 +36,7 @@ class Primitive:
     def handle(self, index, position):
         pass
 
-    def render(self, draw_list, offset):
+    def render(self, draw_list, offset, scale):
         pass
 
 class Rect(Primitive):
@@ -71,16 +72,16 @@ class Rect(Primitive):
             self[2] = int(position.x - self[0])
             self[3] = int(position.y - self[1])
 
-    def render(self, draw_list, offset):
+    def render(self, draw_list, offset, scale):
         if self.arity == 5:
             color = util.parse_color(self[4])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
-        draw_list.add_rect_filled(self[0] + offset.x,
-                                  self[1] + offset.y,
-                                  self[0] + self[2] + offset.x,
-                                  self[1] + self[3] + offset.y,
+        draw_list.add_rect_filled(self[0] * scale + offset.x,
+                                  self[1] * scale + offset.y,
+                                  (self[0] + self[2]) * scale + offset.x,
+                                  (self[1] + self[3]) * scale + offset.y,
                                   color)
 
 class Line(Primitive):
@@ -93,7 +94,6 @@ class Line(Primitive):
         return [4, 5]
 
     def __init__(self, arity, *parameters):
-        assert arity in Line.static_arity()
         super(Line, self).__init__(Line.static_name(), arity, *parameters)
 
     def move(self, position):
@@ -127,18 +127,64 @@ class Line(Primitive):
             self[2] = int(position.x)
             self[3] = int(position.y)
 
-    def render(self, draw_list, offset):
+    def render(self, draw_list, offset, scale):
         if self.arity == 5:
             color = util.parse_color(self[4])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
-        draw_list.add_line(self[0] + offset.x,
-                           self[1] + offset.y,
-                           self[2] + offset.x,
-                           self[3] + offset.y,
+        draw_list.add_line(self[0] * scale + offset.x,
+                           self[1] * scale + offset.y,
+                           self[2] * scale + offset.x,
+                           self[3] * scale + offset.y,
                            color)
 
+class Vector(Primitive):
+    @staticmethod
+    def static_name():
+        return "vector"
+
+    @staticmethod
+    def static_arity():
+        return [4, 5]
+
+    def __init__(self, arity, *parameters):
+        super(Vector, self).__init__(Vector.static_name(), arity, *parameters)
+
+    def move(self, position):
+        delta = self.position() - position
+
+        self[0] -= delta.x
+        self[1] -= delta.y
+
+    def position(self) -> Point:
+        return Point(self[0], self[1])
+
+    def bounds(self) -> Bounds:
+        return Bounds(Point(self[0], self[1]), Point(self[0] + self[3] * math.cos(self[2]), self[1] + self[3] * math.sin(self[2])))
+
+    def handles(self) -> [Point]:
+        return [Point(self[0], self[1]), Point(self[0] + self[3] * math.cos(self[2]), self[1] + self[3] * math.sin(self[2]))]
+
+    def handle(self, index, position):
+        if index == 0:
+            self[0] = int(position.x)
+            self[1] = int(position.y)
+        elif index == 1:
+            self[2] = int(position.x)
+            self[3] = int(position.y)
+
+    def render(self, draw_list, offset, scale):
+        if self.arity == 5:
+            color = util.parse_color(self[4])
+        else:
+            color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
+
+        draw_list.add_line(self[0] * scale + offset.x,
+                           self[1] * scale + offset.y,
+                           self[0] * scale + self[2] * scale * math.cos(self[3]) + offset.x,
+                           self[1] * scale + self[2] * scale * math.sin(self[3]) + offset.y,
+                           color)
 
 class Circle(Primitive):
     @staticmethod
@@ -173,14 +219,14 @@ class Circle(Primitive):
         if index == 0:
             self[2] = int(len(position - Point(self[0], self[1])))
 
-    def render(self, draw_list, offset):
+    def render(self, draw_list, offset, scale):
         if self.arity == 4:
             color = util.parse_color(self[3])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
-        draw_list.add_circle_filled(self[0] + offset.x,
-                                    self[1] + offset.y,
-                                    self[2],
+        draw_list.add_circle_filled(self[0] * scale + offset.x,
+                                    self[1] * scale + offset.y,
+                                    self[2] * scale,
                                     color,
                                     30)

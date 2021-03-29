@@ -1,0 +1,10 @@
+pylo
+glfw
+numpy
+scipy
+orderedset
+networkx
+setuptools
+miniKanren
+concur-imgui
+PyOpenGl

@@ -1,5 +1,6 @@
 import math
 import imgui
+import numpy as np
 
 from pylo.language.commons import Constant
 
@@ -81,11 +82,13 @@ def parse_color(color):
                 (r, g, b), a = (float(int(color.lstrip("c_")[i:i+2], 16)) / 255.0 for i in (0, 2, 4)), 1.0
             elif len(color) == 10:
                 (r, g, b, a) = (float(int(color.lstrip("c_")[i:i+2], 16)) / 255.0 for i in (0, 2, 4, 6))
-    elif isinstance(color, int):
-        (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb(color / 360.0, 1.0, 1.0)]), 1.0
-    elif isinstance(color, float):
-        (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb(color, 1.0, 1.0)]), 1.0
-
+    elif isinstance(color, (int, float, np.integer)):
+        if color <= 1:
+            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb(color, 1.0, 1.0)]), 1.0
+        else:
+            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb((color % 360.0) / 360.0, 1.0, 1.0)]), 1.0
+    else:
+        print(color, type(color))
     return imgui.get_color_u32_rgba(r, g, b, a)
 
 def print_methods(obj):
