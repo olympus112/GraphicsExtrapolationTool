@@ -1,4 +1,4 @@
-from gui.primitives import Rect, Line, Circle
+from gui.primitives import *
 from parsing.atom_translator import Translator
 from gui.graphics import Canvas, BUTTON_LEFT, BUTTON_RIGHT, Point
 from imgui.integrations.glfw import GlfwRenderer
@@ -348,7 +348,7 @@ class Screen:
 
         # Update origin
         origin = imgui.Vec2(position_min.x + self.camera_offset.x, position_min.y + self.camera_offset.y)
-        mouse_position_in_canvas = Point(io.mouse_pos.x - origin.x, io.mouse_pos.y - origin.y)
+        mouse_position_in_canvas = Point(io.mouse_pos.x - origin.x, origin.y - io.mouse_pos.y)
         mouse_position_in_canvas = mouse_position_in_canvas / self.icanvas.scale
 
         # Update intersected
@@ -385,6 +385,14 @@ class Screen:
                     int(mouse_position_in_canvas.y - 25),
                     int(mouse_position_in_canvas.x + 25),
                     int(mouse_position_in_canvas.y + 25)))
+                self.reload_itext()
+            if imgui.menu_item("Add vector")[0]:
+                self.icanvas.primitives.append(Vector(
+                    4,
+                    int(mouse_position_in_canvas.x),
+                    int(mouse_position_in_canvas.y),
+                    45,
+                    100))
                 self.reload_itext()
             if imgui.menu_item("Add circle")[0]:
                 self.icanvas.primitives.append(Circle(

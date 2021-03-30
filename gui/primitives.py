@@ -79,9 +79,9 @@ class Rect(Primitive):
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
         draw_list.add_rect_filled(self[0] * scale + offset.x,
-                                  self[1] * scale + offset.y,
+                                  self[1] * -scale + offset.y,
                                   (self[0] + self[2]) * scale + offset.x,
-                                  (self[1] + self[3]) * scale + offset.y,
+                                  (self[1] + self[3]) * -scale + offset.y,
                                   color)
 
 class Line(Primitive):
@@ -134,9 +134,9 @@ class Line(Primitive):
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
         draw_list.add_line(self[0] * scale + offset.x,
-                           self[1] * scale + offset.y,
+                           self[1] * -scale + offset.y,
                            self[2] * scale + offset.x,
-                           self[3] * scale + offset.y,
+                           self[3] * -scale + offset.y,
                            color)
 
 class Vector(Primitive):
@@ -161,18 +161,23 @@ class Vector(Primitive):
         return Point(self[0], self[1])
 
     def bounds(self) -> Bounds:
-        return Bounds(Point(self[0], self[1]), Point(self[0] + self[3] * math.cos(self[2]), self[1] + self[3] * math.sin(self[2])))
+        return Bounds(
+            Point(self[0], self[1]),
+            Point(self[0] + self[3] * math.cos(math.radians(self[2])), self[1] + self[3] * math.sin(math.radians(self[2]))))
 
     def handles(self) -> [Point]:
-        return [Point(self[0], self[1]), Point(self[0] + self[3] * math.cos(self[2]), self[1] + self[3] * math.sin(self[2]))]
+        return [Point(self[0], self[1]), Point(self[0] + self[3] * math.cos(math.radians(self[2])), self[1] + self[3] * math.sin(math.radians(self[2])))]
 
     def handle(self, index, position):
         if index == 0:
             self[0] = int(position.x)
             self[1] = int(position.y)
         elif index == 1:
-            self[2] = int(position.x)
-            self[3] = int(position.y)
+            delta = position - self.position()
+            self[2] = int(math.degrees(math.atan2(delta.y, delta.x)))
+            if self[2] < 0:
+                self[2] += 180
+            self[3] = int(delta.length())
 
     def render(self, draw_list, offset, scale):
         if self.arity == 5:
@@ -181,9 +186,9 @@ class Vector(Primitive):
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
         draw_list.add_line(self[0] * scale + offset.x,
-                           self[1] * scale + offset.y,
-                           self[0] * scale + self[2] * scale * math.cos(self[3]) + offset.x,
-                           self[1] * scale + self[2] * scale * math.sin(self[3]) + offset.y,
+                           self[1] * -scale + offset.y,
+                           self[0] * scale + self[3] * math.cos(math.radians(self[2])) * scale + offset.x,
+                           self[1] * -scale + self[3] * math.sin(math.radians(self[2])) * -scale + offset.y,
                            color)
 
 class Circle(Primitive):
@@ -217,7 +222,7 @@ class Circle(Primitive):
 
     def handle(self, index, position):
         if index == 0:
-            self[2] = int(len(position - Point(self[0], self[1])))
+            self[2] = int((position - Point(self[0], self[1]).length()))
 
     def render(self, draw_list, offset, scale):
         if self.arity == 4:
@@ -226,7 +231,7 @@ class Circle(Primitive):
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
         draw_list.add_circle_filled(self[0] * scale + offset.x,
-                                    self[1] * scale + offset.y,
+                                    self[1] * -scale + offset.y,
                                     self[2] * scale,
                                     color,
                                     30)

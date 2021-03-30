@@ -37,11 +37,15 @@ class Point:
 
         return Point(x, y)
 
-    def __len__(self):
+    def length(self):
         return math.sqrt(self.x * self.x + self.y * self.y)
 
     def render(self, draw_list, offset, scale):
-        draw_list.add_circle(self.x * scale + offset.x, self.y * scale + offset.y, 10, imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0))
+        draw_list.add_circle(
+            self.x * scale + offset.x,
+            self.y * -scale + offset.y,
+            10,
+            imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0))
 
 class Dimension:
     def __init__(self, width, height):
@@ -93,9 +97,9 @@ class Bounds:
 
     def render(self, draw_list, offset, scale, margin=0):
         draw_list.add_rect(self.min.x * scale + offset.x - margin,
-                           self.min.y * scale + offset.y - margin,
+                           self.min.y * -scale + offset.y + margin,
                            self.max.x * scale + offset.x + margin,
-                           self.max.y * scale + offset.y + margin,
+                           self.max.y * -scale + offset.y - margin,
                            imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
 
     def __contains__(self, item):
