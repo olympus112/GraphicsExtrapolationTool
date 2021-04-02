@@ -1,8 +1,9 @@
 import math
 from typing import Sequence, Union
 
+from sklearn.metrics import mean_squared_error
 from scipy.optimize import leastsq
-from pattern.metaclasses import *
+from .metaclasses import *
 from gui import util
 import numpy as np
 
@@ -15,6 +16,11 @@ from pylo.engines import SWIProlog
 from pylo.language.commons import c_type, c_pred, c_const, Clause, c_var
 
 class Pattern:
+    @staticmethod
+    def confidence(parameters: np.array, true_parameters: np.array, tolerance: float):
+
+        return np.exp(-np.sqrt(np.average(np.square((parameters - true_parameters) / tolerance))) / (1.0 + tolerance))
+
     @staticmethod
     def search(primitives: Sequence[Primitive], available_patterns: Sequence, extrapolations: int, tolerance: float):
         output_parameters = [[] for _ in range(extrapolations)]
@@ -129,7 +135,8 @@ class ConstantPattern(object, metaclass=MPattern.ConstantPattern):
         if flags.has_str():
             confidence = 1.0
         else:
-            confidence = 1.0
+            true_parameters = np.full(len(parameters), value, dtype=flags.dtype)
+            confidence = Pattern.confidence(parameters, true_parameters, tolerance)
 
         return ConstantPattern(confidence, index, value, tolerance)
 
@@ -137,9 +144,10 @@ class ConstantPattern(object, metaclass=MPattern.ConstantPattern):
         return self.value
 
 class LinearPattern(object, metaclass=MPattern.LinearPattern):
-    def __init__(self, confidence: float, index: int, delta: float, tolerance: float):
+    def __init__(self, confidence: float, index: int, start: float, delta: float, tolerance: float):
         self.confidence = confidence
         self.index = index
+        self.start = start
         self.delta = delta
         self.tolerance = tolerance
 
@@ -147,7 +155,7 @@ class LinearPattern(object, metaclass=MPattern.LinearPattern):
         return repr(self)
 
     def __repr__(self):
-        return "Linear[confidence={}, index={}, delta={}, tolerance={}]".format(self.confidence, self.index, self.delta, self.tolerance)
+        return "Linear[confidence={}, index={}, start={}, delta={}, tolerance={}]".format(self.confidence, self.index, self.start, self.delta, self.tolerance)
 
     @staticmethod
     def minimum_parameters():
@@ -158,18 +166,20 @@ class LinearPattern(object, metaclass=MPattern.LinearPattern):
         if flags.has_str():
             return None
 
+        start = parameters[0]
         delta = parameters[1] - parameters[0]
 
         for i in range(2, len(parameters)):
             if not util.equal_tolerant(parameters[i - 1] + delta, parameters[i], abs(tolerance * delta)):
                 return None
 
-        confidence = 1.0
+        true_parameters = np.arange(start, start + len(parameters) * delta, delta)
+        confidence = Pattern.confidence(parameters, true_parameters, tolerance)
 
-        return LinearPattern(confidence, index, delta, tolerance)
+        return LinearPattern(confidence, index, start, delta, tolerance)
 
-    def next(self, parameters: Sequence[Union[float, str, int]], nth: int = 1):
-        return parameters[0] + (len(parameters) - 1 + nth) * self.delta
+    def next(self, nth: int = 1):
+        return self.start + nth * self.delta
 
 
 class Operator:
@@ -345,14 +355,11 @@ class BFSOperatorPattern(object, metaclass=MPattern.OperatorPattern):
 
         return None
 
-    def next(self, parameters: Sequence[Union[float, str, int]], nth: int = 1, return_table: bool = False):
+    def next(self, parameters: Sequence[Union[float, str, int]], nth: int = 1):
         values = self.values.copy()
         for _ in range(nth):
             for i in range(len(self.operators) - 1, -1, -1):
                 values[i] = self.operators[i].next(values[i + 1], values[i])
-
-        if return_table:
-            return values
 
         return values[0]
 
@@ -388,8 +395,7 @@ class SinusoidalPattern(object, metaclass=MPattern.SinusoidalPattern):
         guess_phase = 0
         guess_freq = 1
         guess_amp = 1
-        est_amp, est_freq, est_phase, est_mean = leastsq(lambda x: x[0] * np.sin(x[1] * t + x[2]) + x[3] - parameters,
-                                                         np.array([guess_amp, guess_freq, guess_phase, guess_mean]))[0]
+        est_amp, est_freq, est_phase, est_mean = leastsq(lambda x: x[0] * np.sin(x[1] * t + x[2]) + x[3] - parameters, np.array([guess_amp, guess_freq, guess_phase, guess_mean]))[0]
         confidence = 1.0
 
         return SinusoidalPattern(confidence, index, est_amp, est_freq, est_phase, est_mean)
@@ -399,7 +405,8 @@ class SinusoidalPattern(object, metaclass=MPattern.SinusoidalPattern):
 
 
 class PeriodicPattern(object, metaclass=MPattern.PeriodicPattern):
-    def __init__(self, index, pattern):
+    def __init__(self, confidence: float, index: int, pattern: []):
+        self.confidence = confidence
         self.index = index
         self.pattern = pattern
 
@@ -407,14 +414,14 @@ class PeriodicPattern(object, metaclass=MPattern.PeriodicPattern):
         return repr(self)
 
     def __repr__(self):
-        return "Period[index={}, pattern={}]".format(self.index, self.pattern)
+        return "Period[confidence={}, index={}, pattern={}]".format(self.confidence, self.index, self.pattern)
 
     @staticmethod
     def minimum_parameters():
         return 2
 
     @staticmethod
-    def apply(parameters: Sequence[Union[float, str, int]], index: int, flags: PatternFlags, tolerance: float = 0.1):
+    def apply(parameters: np.array, index: int, flags: PatternFlags, tolerance: float = 0.1):
         def equal(x, y):
             if flags.has_str():
                 return x == y
@@ -444,13 +451,18 @@ class PeriodicPattern(object, metaclass=MPattern.PeriodicPattern):
                     multiplicity = 0
                     match_index = 0
 
-        # if multiplicity == 0:
-        #     return None
+        if multiplicity == 0:
+            confidence = 0.5
+        elif flags.has_str():
+            confidence = 1.0
+        else:
+            true_parameters = pattern * multiplicity + pattern[:len(parameters) % len(pattern)]
+            confidence = Pattern.confidence(parameters, true_parameters, tolerance)
 
-        return PeriodicPattern(index, pattern)
+        return PeriodicPattern(confidence, index, pattern)
 
-    def next(self, parameters: Sequence[Union[float, str, int]], nth: int = 1):
-        return self.pattern[(len(parameters) + nth) % len(self.pattern) - 1]
+    def next(self, nth: int = 1):
+        return self.pattern[nth % len(self.pattern) - 1]
 
 class CircularPattern(object, metaclass=MPattern.CircularPattern):
     def __init__(self, index_x, index_y, center, angle):
@@ -607,11 +619,11 @@ class ILPPattern:
 
 if __name__ == '__main__':
     code = """
+    p(1.2).
     p(1).
     p(1).
     p(1).
-    p(1.35).
     """
 
     primitives = Parser.parse(code)
-    print(Pattern.search(primitives, 3, 0.4))
+    print(Pattern.search(primitives, [ConstantPattern], 2, .2))
