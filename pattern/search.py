@@ -1,13 +1,14 @@
 from typing import Sequence
 
-from pylo.engines.prolog import SWIProlog
+# from pylo.engines.prolog import SWIProlog
 
 from pylo.engines import MiniKanren
 from pylo.language.commons import Atom
 
 class Search:
     def __init__(self):
-        self.solver = SWIProlog()
+        # self.solver = SWIProlog()
+        self.solver = None
 
     @staticmethod
     def search(atoms: Sequence[Atom]):

@@ -2,7 +2,7 @@ import math
 
 import imgui
 
-from gui import util
+import util
 
 BUTTON_LEFT = 0
 BUTTON_RIGHT = 1

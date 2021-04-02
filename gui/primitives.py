@@ -1,4 +1,4 @@
-from gui import util
+import util
 from gui.graphics import Point, Bounds
 import math
 import imgui

@@ -7,13 +7,13 @@ from .metaclasses import *
 from gui import util
 import numpy as np
 
-from loreleai.learning import Knowledge, Task
-from loreleai.learning.eval_functions import Coverage, Compression, Accuracy
-from loreleai.learning.learners import Aleph
 from parsing.primitive_parser import Parser, Primitive
+# from loreleai.learning import Knowledge, Task
+# from loreleai.learning.eval_functions import Coverage, Compression, Accuracy
+# from loreleai.learning.learners import Aleph
+# from pylo.engines import SWIProlog
+# from pylo.language.commons import c_type, c_pred, c_const, Clause, c_var
 
-from pylo.engines import SWIProlog
-from pylo.language.commons import c_type, c_pred, c_const, Clause, c_var
 
 class Pattern:
     @staticmethod
@@ -492,79 +492,79 @@ class CircularPattern(object, metaclass=MPattern.CircularPattern):
     def next(self, parameters: Sequence[Union[float, str, int]], nth: int = 1):
         return 0
 
-class ILPPattern:
-    def __init__(self, index):
-        self.index = index
-
-    def __str__(self):
-        return repr(self)
-
-    def __repr__(self):
-        return "ILP[index={}]".format(self.index)
-
-    @staticmethod
-    def apply(primitives: [Primitive], index):
-        if len(primitives) < 2:
-            return None
-
-        if min([primitive.arity for primitive in primitives]) <= index:
-            return None
-
-        knowledge = Knowledge()
-        name = primitives[0].name
-        arity = primitives[0].arity
-        primitive_type = c_type("primitive")
-        primitives_as_constants = [c_const(name + "_" + str(i), domain=primitive_type) for i in range(len(primitives))]
-
-        # Follows generation
-        follows = c_pred("follows", 2, domains=[primitive_type, primitive_type])
-        for i in range(len(primitives) - 1):
-            knowledge.add(follows(primitives_as_constants[i], primitives_as_constants[i + 1]))
-
-        unique_parameters_mapping = {}
-        parameter_type = c_type("parameter_type")
-        parameters = [primitive[index] for primitive in primitives]
-        for unique_parameter in set(parameters):
-            unique_parameters_mapping[unique_parameter] = c_const(unique_parameter, domain=parameter_type)
-
-        parameter_predicate = c_pred("parameter", 2, domains=[primitive_type, parameter_type])
-        for i in range(len(primitives)):
-            knowledge.add(parameter_predicate(primitives_as_constants[i], unique_parameters_mapping[parameters[i]]))
-
-        positive_examples = set()
-        negative_examples = set()
-        next_predicate = c_pred("next", 2, domains=[primitive_type, parameter_type])
-        for i in range(1,len(primitives) - 1):
-            positive_examples.add(next_predicate(primitives_as_constants[i], unique_parameters_mapping[parameters[i + 1]]))
-            negative_parameters_set = set(parameters)
-            negative_parameters_set.remove(parameters[i + 1])
-            for negative_parameter in negative_parameters_set:
-                negative_examples.add(next_predicate(primitives_as_constants[i], unique_parameters_mapping[negative_parameter]))
-
-        task = Task(positive_examples=positive_examples, negative_examples=negative_examples)
-        solver = SWIProlog()
-        solver.retract_all()
-
-        # EvalFn must return an upper bound on quality to prune search space.
-        eval_fn1 = Coverage(return_upperbound=True)
-        # eval_fn2 = Compression(return_upperbound=True)
-        eval_fn3 = Accuracy(return_upperbound=True)
-
-        learners = [Aleph(solver, eval_fn, max_body_literals=4, do_print=True)
-                    for eval_fn in [eval_fn1, eval_fn3]]
-
-        for learner in learners:
-            res = learner.learn(task, knowledge, None, minimum_freq=1)
-            print(res)
-            prog = res["final_program"]
-            solver.assertz(prog)
-            print(solver.query(next_predicate(primitives_as_constants[-1], c_var("Color", domain=parameter_type))))
-
-
-    def next(self, primitives, nth=1, return_table=False):
-        pass
-
-        return 0
+# class ILPPattern:
+#     def __init__(self, index):
+#         self.index = index
+#
+#     def __str__(self):
+#         return repr(self)
+#
+#     def __repr__(self):
+#         return "ILP[index={}]".format(self.index)
+#
+#     @staticmethod
+#     def apply(primitives: [Primitive], index):
+#         if len(primitives) < 2:
+#             return None
+#
+#         if min([primitive.arity for primitive in primitives]) <= index:
+#             return None
+#
+#         knowledge = Knowledge()
+#         name = primitives[0].name
+#         arity = primitives[0].arity
+#         primitive_type = c_type("primitive")
+#         primitives_as_constants = [c_const(name + "_" + str(i), domain=primitive_type) for i in range(len(primitives))]
+#
+#         # Follows generation
+#         follows = c_pred("follows", 2, domains=[primitive_type, primitive_type])
+#         for i in range(len(primitives) - 1):
+#             knowledge.add(follows(primitives_as_constants[i], primitives_as_constants[i + 1]))
+#
+#         unique_parameters_mapping = {}
+#         parameter_type = c_type("parameter_type")
+#         parameters = [primitive[index] for primitive in primitives]
+#         for unique_parameter in set(parameters):
+#             unique_parameters_mapping[unique_parameter] = c_const(unique_parameter, domain=parameter_type)
+#
+#         parameter_predicate = c_pred("parameter", 2, domains=[primitive_type, parameter_type])
+#         for i in range(len(primitives)):
+#             knowledge.add(parameter_predicate(primitives_as_constants[i], unique_parameters_mapping[parameters[i]]))
+#
+#         positive_examples = set()
+#         negative_examples = set()
+#         next_predicate = c_pred("next", 2, domains=[primitive_type, parameter_type])
+#         for i in range(1,len(primitives) - 1):
+#             positive_examples.add(next_predicate(primitives_as_constants[i], unique_parameters_mapping[parameters[i + 1]]))
+#             negative_parameters_set = set(parameters)
+#             negative_parameters_set.remove(parameters[i + 1])
+#             for negative_parameter in negative_parameters_set:
+#                 negative_examples.add(next_predicate(primitives_as_constants[i], unique_parameters_mapping[negative_parameter]))
+#
+#         task = Task(positive_examples=positive_examples, negative_examples=negative_examples)
+#         solver = SWIProlog()
+#         solver.retract_all()
+#
+#         # EvalFn must return an upper bound on quality to prune search space.
+#         eval_fn1 = Coverage(return_upperbound=True)
+#         # eval_fn2 = Compression(return_upperbound=True)
+#         eval_fn3 = Accuracy(return_upperbound=True)
+#
+#         learners = [Aleph(solver, eval_fn, max_body_literals=4, do_print=True)
+#                     for eval_fn in [eval_fn1, eval_fn3]]
+#
+#         for learner in learners:
+#             res = learner.learn(task, knowledge, None, minimum_freq=1)
+#             print(res)
+#             prog = res["final_program"]
+#             solver.assertz(prog)
+#             print(solver.query(next_predicate(primitives_as_constants[-1], c_var("Color", domain=parameter_type))))
+#
+#
+#     def next(self, primitives, nth=1, return_table=False):
+#         pass
+#
+#         return 0
 
 
 # pattern timeseries
@@ -626,4 +626,4 @@ if __name__ == '__main__':
     """
 
     primitives = Parser.parse(code)
-    print(Pattern.search(primitives, [ConstantPattern], 2, .2))
+    print(Pattern.search(primitives, [ConstantPattern, LinearPattern, PeriodicPattern, BFSOperatorPattern, SinusoidalPattern], 3, 0.4))
