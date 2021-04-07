@@ -1,13 +1,33 @@
-import util
+from typing import Optional, Set
+
+from gui import util
 from gui.graphics import Point, Bounds
+import numpy as np
 import math
 import imgui
+
+class ReferenceFactory:
+    reference_counter: int = -1
+    free_references: Set[int] = set()
+
+    @staticmethod
+    def new_reference():
+        if len(ReferenceFactory.free_references) == 0:
+            ReferenceFactory.reference_counter += 1
+            return ReferenceFactory.reference_counter
+        else:
+            return ReferenceFactory.free_references.pop()
+
+    @staticmethod
+    def free_reference(reference: int):
+        ReferenceFactory.free_references.add(reference)
 
 class Primitive:
     def __init__(self, name, arity, *parameters):
         self.name = name
         self.arity = arity
         self.parameters = list(parameters)
+        self.reference = ReferenceFactory.new_reference()
 
     def __getitem__(self, item):
         return self.parameters[item]
@@ -20,6 +40,15 @@ class Primitive:
 
     def __repr__(self):
         return self.name + "/" + str(self.arity) + str(self.parameters)
+
+    def __len__(self):
+        return self.arity
+
+    def __del__(self):
+        ReferenceFactory.free_reference(self.reference)
+
+    def master(self):
+        return self
 
     def move(self, position):
         pass
@@ -38,6 +67,85 @@ class Primitive:
 
     def render(self, draw_list, offset, scale):
         pass
+
+class Group(Primitive):
+    def __init__(self, *primitives):
+        super(Group, self).__init__(None, len(primitives), *primitives)
+        self._master = None
+        self._min_arity = None
+        self._max_arity = None
+
+    def __str__(self):
+        return '{ ' + '\n'.join(map(str, self.parameters)) + ' }'
+
+    def __repr__(self):
+        return '{ ' + ', '.join(map(repr, self.parameters)) + ' }'
+
+    def __iter__(self):
+        return self.parameters.__iter__()
+
+    def set_master(self, primitive):
+        self._master = primitive
+
+    def master(self) -> Primitive:
+        return self._master
+
+    def max_arity(self):
+        return self._max_arity
+
+    def min_arity(self):
+        return self._min_arity
+
+    def _update_min_arity(self, arity):
+        if self._min_arity is None or arity < self._min_arity:
+            self._min_arity = arity
+
+    def _update_max_arity(self, arity):
+        if self._max_arity is None or arity > self._max_arity:
+            self._max_arity = arity
+
+    def _recalculate_arity(self):
+        self._min_arity = None
+        self._max_arity = None
+        for primitive in self.parameters:
+            self._update_min_arity(primitive.master().arity)
+            self._update_max_arity(primitive.master().arity)
+
+    def append(self, primitive):
+        if self.arity == 0:
+            self._master = primitive.master()
+
+        self._update_min_arity(primitive.master().arity)
+        self._update_max_arity(primitive.master().arity)
+
+        self.parameters.append(primitive)
+        self.arity += 1
+
+    def move(self, position):
+        for primitive in self.parameters:
+            primitive.move(position)
+
+    def position(self) -> Point:
+        position = Point(0, 0)
+        for primitive in self.parameters:
+            position += primitive.position()
+
+        return position / len(self.parameters)
+
+    def bounds(self) -> Bounds:
+        bounds = None
+        for primitive in self.parameters:
+            if bounds is None:
+                bounds = primitive.bounds()
+            else:
+                bounds = bounds.expanded(primitive.bounds)
+        return bounds
+
+    def render(self, draw_list, offset, scale):
+        self.bounds().render(draw_list, offset, scale, 10)
+        for primitive in self.parameters:
+            primitive.render(draw_list, offset, scale)
+
 
 class Rect(Primitive):
     @staticmethod

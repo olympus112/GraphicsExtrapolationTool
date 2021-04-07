@@ -96,3 +96,6 @@ def print_methods(obj):
 
 def print_attrs(obj):
     print([attr for attr in dir(obj)])
+
+def str_list(lst):
+    return ", ".join(list(map(str, lst))).join(['[', ']'])

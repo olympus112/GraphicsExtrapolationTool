@@ -65,19 +65,50 @@ class Parser:
         return Parser.create_primitive(name, arity, parameters)
 
     @staticmethod
-    def parse(code: str) -> Sequence[Primitive]:
+    def parse(code: str) -> Group:
         lexer = Lexer(code)
-        primitives: [Primitive] = []
+        primitives = Group()
+        stack = [primitives]
 
+        parse_next_master = False
         current = lexer.next()
         while current.type != Lexer.Token.END:
-            if current.type == Lexer.Token.IDENTIFIER:
+            if current.type == Lexer.Token.OPERATOR and lexer.str(current) == "!":
+                parse_next_master = True
+            elif current.type == Lexer.Token.IDENTIFIER:
                 primitive = Parser.parse_primitive(lexer, current)
                 if primitive is not None:
-                    primitives.append(primitive)
+                    stack[-1].append(primitive)
+                    if parse_next_master:
+                        stack[-1].set_master(primitive)
+                        parse_next_master = False
+            elif current.type == Lexer.Token.LEFTCURL:
+                stack.append(Group())
+            elif current.type == Lexer.Token.RIGHTCURL:
+                if len(stack) == 1:
+                    return primitives
+
+                group = stack.pop()
+                stack[-1].append(group)
             else:
                 return primitives
 
             current = lexer.next()
 
         return primitives
+
+if __name__ == '__main__':
+    r = Parser.parse("""
+        line(10, 10, 10, 10). 
+        !p(10).
+        { 
+            rect(20, 20, 20, 20). 
+            !p(2).
+            {
+                !snoepie(poepie).
+            }
+        }
+    """)
+    print(r.master())
+    print(r[1].master())
+    print(r[2].master())

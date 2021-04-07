@@ -13,7 +13,7 @@ def search(input_parameters: [[float]], extrapolations: int) -> [[float]]:
     for index in range(primitive_arity):
         parameters = [input_parameter[index] for input_parameter in input_parameters]
         for pattern in possible_patterns:
-            flags = PatternFlags(parameters)
+            flags = ParameterFlags(parameters)
             result = pattern.apply(parameters, index, flags)
             if result is not None:
                 for extrapolation in range(extrapolations):
