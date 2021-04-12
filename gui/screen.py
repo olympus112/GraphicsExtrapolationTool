@@ -1,6 +1,7 @@
 from gui.primitives import *
 from parsing.atom_translator import Translator
-from gui.graphics import Canvas, BUTTON_LEFT, BUTTON_RIGHT, Point
+from gui.graphics import BUTTON_LEFT, BUTTON_RIGHT, Point
+from gui.canvas import Canvas
 from imgui.integrations.glfw import GlfwRenderer
 from datetime import datetime
 from os import listdir
@@ -214,9 +215,9 @@ class Screen:
                 search = Search()
                 if len(self.knowledge) > 0:
                     canvas_atoms, canvas_predicates = Translator.translate(self.icanvas.primitives)
-                    knowledge_atoms, knowledge_predicates = Translator.translate(Parser.parse(self.knowledge),
+                    knowledge_atoms, knowledge_predicates = Translator.translate(PrimitiveParser.parse(self.knowledge),
                                                                                  canvas_predicates)
-                    query_atoms, query_predicates = Translator.translate(Parser.parse(self.query), knowledge_predicates)
+                    query_atoms, query_predicates = Translator.translate(PrimitiveParser.parse(self.query), knowledge_predicates)
                     if knowledge_atoms is not None and query_atoms is not None:
                         search.assertz(canvas_atoms)
                         search.assertz(knowledge_atoms)
@@ -466,11 +467,11 @@ class Screen:
 
     def reload_icanvas(self):
         self.icanvas.reset_selection()
-        self.icanvas.primitives = Parser.parse(self.itext)
+        self.icanvas.primitives = PrimitiveParser.parse(self.itext)
 
     def reload_ocanvas(self):
         self.ocanvas.reset_selection()
-        self.ocanvas.primitives = Parser.parse(self.otext)
+        self.ocanvas.primitives = PrimitiveParser.parse(self.otext)
 
     def reload_itext(self):
         self.itext = str(self.icanvas)
@@ -486,6 +487,6 @@ class Screen:
 
             if output_parameters is not None:
                 for parameters in output_parameters:
-                    self.ocanvas.primitives.append(Parser.create_primitive(parameters[0], len(parameters) - 1, parameters[1:]))
+                    self.ocanvas.primitives.append(PrimitiveParser.create_primitive(parameters[0], len(parameters) - 1, parameters[1:]))
 
             self.reload_otext()

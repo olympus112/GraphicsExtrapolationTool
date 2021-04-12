@@ -1,56 +1,30 @@
-from typing import Optional, Set
-
-from gui import util
-from gui.graphics import Point, Bounds
-import numpy as np
+from __future__ import annotations
+from typing import *
+from abc import *
 import math
-import imgui
 
-class ReferenceFactory:
-    reference_counter: int = -1
-    free_references: Set[int] = set()
+from gui.graphics import Point, Bounds
+from misc.util import *
+from misc import default
 
-    @staticmethod
-    def new_reference():
-        if len(ReferenceFactory.free_references) == 0:
-            ReferenceFactory.reference_counter += 1
-            return ReferenceFactory.reference_counter
-        else:
-            return ReferenceFactory.free_references.pop()
+class Renderable(ABC):
+    referenceFactory = ReferenceFactory()
 
-    @staticmethod
-    def free_reference(reference: int):
-        ReferenceFactory.free_references.add(reference)
+    def __init__(self):
+        self._identifier = Renderable.referenceFactory.new()
 
-class Primitive:
-    def __init__(self, name, arity, *parameters):
-        self.name = name
-        self.arity = arity
-        self.parameters = list(parameters)
-        self.reference = ReferenceFactory.new_reference()
+    @property
+    def identifier(self) -> ReferenceFactory.Reference:
+        return self._identifier
 
-    def __getitem__(self, item):
-        return self.parameters[item]
-
-    def __setitem__(self, key, value):
-        self.parameters[key] = value
-
-    def __str__(self):
-        return self.name + ", ".join(map(str, self.parameters)).join(list("()")) + "."
-
-    def __repr__(self):
-        return self.name + "/" + str(self.arity) + str(self.parameters)
-
-    def __len__(self):
-        return self.arity
-
-    def __del__(self):
-        ReferenceFactory.free_reference(self.reference)
+    @identifier.setter
+    def identifier(self, value: ReferenceFactory.Reference):
+        pass
 
     def master(self):
         return self
 
-    def move(self, position):
+    def move(self, position: Point):
         pass
 
     def position(self) -> Point:
@@ -62,79 +36,160 @@ class Primitive:
     def handles(self) -> [Point]:
         return []
 
-    def handle(self, index, position):
+    def handle(self, index: int, position: Point):
         pass
 
-    def render(self, draw_list, offset, scale):
+    def render(self, draw_list, offset: Point, scale: float):
         pass
 
-class Group(Primitive):
-    def __init__(self, *primitives):
-        super(Group, self).__init__(None, len(primitives), *primitives)
-        self._master = None
-        self._min_arity = None
-        self._max_arity = None
 
-    def __str__(self):
-        return '{ ' + '\n'.join(map(str, self.parameters)) + ' }'
+class Primitive(Renderable):
+    Parameter = Union[int, float, str]
+    Parameters = List[Parameter]
 
-    def __repr__(self):
-        return '{ ' + ', '.join(map(repr, self.parameters)) + ' }'
+    def __init__(self, name: Optional[str], arity: int, *parameters: Primitive.Parameter):
+        super(Primitive, self).__init__()
+
+        self.name: str = name
+        self.arity: int = arity
+        self.parameters: Primitive.Parameters = list(parameters)
+
+    def __getitem__(self, item: int) -> Primitive.Parameter:
+        return self.parameters[item]
+
+    def __setitem__(self, key: int, value: Primitive.Parameter):
+        self.parameters[key] = value
+
+    def __str__(self) -> str:
+        return "{}{}{}".format(
+            self.name,
+            format_list(self.parameters, str, default.tokens[default.primitive_begin], default.tokens[default.value_separator], default.tokens[default.primitive_end]),
+            default.tokens[default.primitive_separator])
+
+    def __repr__(self) -> str:
+        return self.name + "/" + str(self.arity) + str(self.parameters)
+
+    def __len__(self) -> int:
+        return self.arity
+
+    @property
+    def master(self) -> Primitive:
+        return self
+
+    def as_list(self):
+        return [self.name] + self.parameters
+
+    @staticmethod
+    def from_list(parameters: Primitive.Parameters):
+        assert len(parameters) > 0
+        name = parameters[0]
+        arity = len(parameters) - 1
+        for primitive in [Line, Rect, Circle, Vector]:
+            if name == primitive.static_name():
+                if arity not in primitive.static_arity():
+                    return None
+                return primitive(arity, *parameters[1:])
+
+        return Primitive(name, arity, *parameters[1:])
+
+
+class PrimitiveGroup(Renderable):
+    Parameter = Union[Primitive, "PrimitiveGroup"]
+    Parameters = List[Parameter]
+
+    def __init__(self, *primitives: Union[Primitive, PrimitiveGroup]):
+        super(PrimitiveGroup, self).__init__()
+
+        self._arity: int = len(primitives)
+        self.primitives: PrimitiveGroup.Parameters = list(primitives)
+        self._master: Optional[Primitive] = None
+        self._min_arity: Optional[int] = None
+        self._max_arity: Optional[int] = None
+
+    def __str__(self) -> str:
+        return format_list(self.primitives, str, default.tokens[default.primitive_group_begin], '', default.tokens[default.primitive_group_end], ' ')
+
+    def __repr__(self) -> str:
+        return "{{{}}}".format(", ".join(map(repr, self.primitives)))
+
+    def __getitem__(self, item: int) -> Union[Primitive, PrimitiveGroup]:
+        return self.primitives[item]
 
     def __iter__(self):
-        return self.parameters.__iter__()
+        return self.primitives.__iter__()
 
-    def set_master(self, primitive):
-        self._master = primitive
-
-    def master(self) -> Primitive:
+    @property
+    def master(self) -> Optional[Primitive]:
         return self._master
 
-    def max_arity(self):
+    @master.setter
+    def master(self, value):
+        self._master = value
+
+    @property
+    def max_arity(self) -> Optional[int]:
         return self._max_arity
 
-    def min_arity(self):
+    @property
+    def min_arity(self) -> Optional[int]:
         return self._min_arity
 
-    def _update_min_arity(self, arity):
-        if self._min_arity is None or arity < self._min_arity:
-            self._min_arity = arity
+    @property
+    def arity(self):
+        return self._arity
 
-    def _update_max_arity(self, arity):
+    def _update_min_arity(self, min_arity: int):
+        if self._min_arity is None or min_arity < self._min_arity:
+            self._min_arity = min_arity
+
+    def _update_max_arity(self, arity: int):
         if self._max_arity is None or arity > self._max_arity:
             self._max_arity = arity
 
     def _recalculate_arity(self):
         self._min_arity = None
         self._max_arity = None
-        for primitive in self.parameters:
-            self._update_min_arity(primitive.master().arity)
-            self._update_max_arity(primitive.master().arity)
+        for primitive in self.primitives:
+            self._update_min_arity(primitive.master.arity)
+            self._update_max_arity(primitive.master.arity)
 
-    def append(self, primitive):
+    def append(self, parameter: PrimitiveGroup.Parameter):
         if self.arity == 0:
-            self._master = primitive.master()
+            self._master = parameter.master
 
-        self._update_min_arity(primitive.master().arity)
-        self._update_max_arity(primitive.master().arity)
+        self._update_min_arity(parameter.master.arity)
+        self._update_max_arity(parameter.master.arity)
 
-        self.parameters.append(primitive)
-        self.arity += 1
+        self.primitives.append(parameter)
+        self._arity += 1
+
+    def find(self, item: ReferenceFactory.Reference) -> Optional[PrimitiveGroup.Parameter]:
+        for primitive in self.primitives:
+            if primitive.identifier == item:
+                return self
+
+            if isinstance(primitive, PrimitiveGroup):
+                result = primitive.find(item)
+
+                if result is not None:
+                    return result
+
+        return None
 
     def move(self, position):
-        for primitive in self.parameters:
+        for primitive in self.primitives:
             primitive.move(position)
 
     def position(self) -> Point:
         position = Point(0, 0)
-        for primitive in self.parameters:
+        for primitive in self.primitives:
             position += primitive.position()
 
-        return position / len(self.parameters)
+        return position / self.arity
 
     def bounds(self) -> Bounds:
         bounds = None
-        for primitive in self.parameters:
+        for primitive in self.primitives:
             if bounds is None:
                 bounds = primitive.bounds()
             else:
@@ -143,7 +198,7 @@ class Group(Primitive):
 
     def render(self, draw_list, offset, scale):
         self.bounds().render(draw_list, offset, scale, 10)
-        for primitive in self.parameters:
+        for primitive in self.primitives:
             primitive.render(draw_list, offset, scale)
 
 
@@ -182,7 +237,7 @@ class Rect(Primitive):
 
     def render(self, draw_list, offset, scale):
         if self.arity == 5:
-            color = util.parse_color(self[4])
+            color = parse_color(self[4])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
@@ -191,6 +246,7 @@ class Rect(Primitive):
                                   (self[0] + self[2]) * scale + offset.x,
                                   (self[1] + self[3]) * -scale + offset.y,
                                   color)
+
 
 class Line(Primitive):
     @staticmethod
@@ -213,15 +269,15 @@ class Line(Primitive):
         self[3] -= delta.y
 
     def position(self) -> Point:
-        min_x, max_x = util.minmax(self[0], self[2])
-        min_y, max_y = util.minmax(self[1], self[3])
+        min_x, max_x = minmax(self[0], self[2])
+        min_y, max_y = minmax(self[1], self[3])
         dx, dy = max_x - min_x, max_y - min_y
 
         return Point(min_x + dx / 2.0, min_y + dy / 2.0)
 
     def bounds(self) -> Bounds:
-        min_x, max_x = util.minmax(self[0], self[2])
-        min_y, max_y = util.minmax(self[1], self[3])
+        min_x, max_x = minmax(self[0], self[2])
+        min_y, max_y = minmax(self[1], self[3])
         return Bounds(Point(min_x, min_y), Point(max_x, max_y))
 
     def handles(self) -> [Bounds]:
@@ -237,7 +293,7 @@ class Line(Primitive):
 
     def render(self, draw_list, offset, scale):
         if self.arity == 5:
-            color = util.parse_color(self[4])
+            color = parse_color(self[4])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
@@ -246,6 +302,7 @@ class Line(Primitive):
                            self[2] * scale + offset.x,
                            self[3] * -scale + offset.y,
                            color)
+
 
 class Vector(Primitive):
     @staticmethod
@@ -289,7 +346,7 @@ class Vector(Primitive):
 
     def render(self, draw_list, offset, scale):
         if self.arity == 5:
-            color = util.parse_color(self[4])
+            color = parse_color(self[4])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 
@@ -298,6 +355,7 @@ class Vector(Primitive):
                            self[0] * scale + self[3] * math.cos(math.radians(self[2])) * scale + offset.x,
                            self[1] * -scale + self[3] * math.sin(math.radians(self[2])) * -scale + offset.y,
                            color)
+
 
 class Circle(Primitive):
     @staticmethod
@@ -334,7 +392,7 @@ class Circle(Primitive):
 
     def render(self, draw_list, offset, scale):
         if self.arity == 4:
-            color = util.parse_color(self[3])
+            color = parse_color(self[3])
         else:
             color = imgui.get_color_u32_rgba(0.4, 0.6, 0.4, 0.8)
 

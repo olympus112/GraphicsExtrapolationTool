@@ -1,8 +1,29 @@
-import math
+from typing import Set
+
 import imgui
 import numpy as np
 
 from pylo.language.commons import Constant
+
+class ReferenceFactory:
+    Reference = int
+
+    def __init__(self):
+        self._reference_counter: ReferenceFactory.Reference = -1
+        self._free_references: Set[ReferenceFactory.Reference] = set()
+
+    def new(self) -> Reference:
+        if len(self._free_references) == 0:
+            self._reference_counter += 1
+            return self._reference_counter
+        else:
+            return self._free_references.pop()
+
+    def release(self, reference: Reference):
+        self._free_references.add(reference)
+
+    def is_free(self, reference: Reference) -> bool:
+        return reference > self._reference_counter or reference in self._free_references
 
 def frange(start, stop=None, step=None):
     # if set start=0.0 and step = 1.0 if not specified
@@ -55,7 +76,7 @@ def parse_color(color):
             return v, v, v
         i = int(h * 6.)  # XXX assume int() truncates!
         f = (h * 6.) - i
-        p, q, t = int(255 * (v * (1. - s))), int(255 * (v * (1. - s * f))), int(255 * (v * (1. - s * (1. - f))));
+        p, q, t = int(255 * (v * (1. - s))), int(255 * (v * (1. - s * f))), int(255 * (v * (1. - s * (1. - f))))
         v *= 255
         i %= 6
         if i == 0:
@@ -97,5 +118,5 @@ def print_methods(obj):
 def print_attrs(obj):
     print([attr for attr in dir(obj)])
 
-def str_list(lst):
-    return ", ".join(list(map(str, lst))).join(['[', ']'])
+def format_list(_list, _format=str, _begin='[', _separator=',', _end=']', _space=''):
+    return (_separator + ' ').join(list(map(_format, _list))).join([_begin + _space, _space + _end])

@@ -1,4 +1,4 @@
-import typing
+from typing import *
 
 class Lexer:
     class Util:
@@ -48,7 +48,7 @@ class Lexer:
             if character is None:
                 return False
 
-            return character in ['+', '-', '*', '/', '<', '>', '~', '&', '|', '#', '!', '?', ':', '=']
+            return character in ['+', '-', '*', '/', '<', '>', '~', '&', '|', '!', '?', ':', '=']
 
     class Token:
         ERROR = 1
@@ -64,12 +64,14 @@ class Lexer:
         DOT = 11
         COMMA = 12
         OPERATOR = 13
-        SEMICOLON = 14
-        SINGLEQUOTE = 15
-        DOUBLEQUOTE = 16
-        STRING = 17
-        COMMENT = 18
-        END = 19
+        HASHTAG = 14
+        ADRESS = 15
+        SEMICOLON = 16
+        SINGLEQUOTE = 17
+        DOUBLEQUOTE = 18
+        STRING = 19
+        COMMENT = 20
+        END = 21
 
         def __init__(self, type: int, start: int, length: int):
             self.type = type
@@ -83,7 +85,7 @@ class Lexer:
         self.current = 0
         self.string = string
 
-    def peek(self, offset: int = 0) -> typing.Union[str, None]:
+    def peek(self, offset: int = 0) -> Union[str, None]:
         index = self.current + offset
 
         if index >= len(self.string):
@@ -244,5 +246,9 @@ class Lexer:
             return self.lex_char(Lexer.Token.COMMA)
         elif character == ';':
             return self.lex_char(Lexer.Token.SEMICOLON)
+        elif character == '#':
+            return self.lex_char(Lexer.Token.HASHTAG)
+        elif character == '@':
+            return self.lex_char(Lexer.Token.ADRESS)
         else:
             return self.lex_char(Lexer.Token.ERROR)

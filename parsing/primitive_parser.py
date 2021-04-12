@@ -1,28 +1,17 @@
-from typing import Union, Sequence
-
 from gui.primitives import *
-from parsing.primitive_lexer import Lexer
+from parsing.lexer import Lexer
+from misc import default
 
-class Parser:
-    @staticmethod
-    def create_primitive(name: str, arity: int, parameters: [Union[str, float, int]]):
-        for primitive in [Line, Rect, Circle, Vector]:
-            if name == primitive.static_name():
-                if arity not in primitive.static_arity():
-                    return None
-                return primitive(arity, *parameters)
-
-        return Primitive(name, arity, *parameters)
-
+class PrimitiveParser:
     @staticmethod
     def parse_primitive(lexer: Lexer, token: Lexer.Token) -> Union[Primitive, None]:
         name = lexer.str(token)
-        if lexer.next().type != Lexer.Token.LEFTPAREN:
+        if lexer.next().type != default.primitive_begin:
             return None
 
-        parameters: [Union[str, float, int]] = []
+        parameters: Primitive.Parameters = []
         current = lexer.next()
-        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, Lexer.Token.RIGHTPAREN }
+        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, default.primitive_end }
 
         while True:
             if current.type not in types:
@@ -31,15 +20,15 @@ class Parser:
             if current.type == Lexer.Token.IDENTIFIER:
                 parameters.append(lexer.str(current))
 
-                types = { Lexer.Token.COMMA, Lexer.Token.RIGHTPAREN }
+                types = { default.value_separator, default.primitive_end }
             elif current.type == Lexer.Token.FLOAT:
                 parameters.append(float(lexer.str(current)))
 
-                types = { Lexer.Token.COMMA, Lexer.Token.RIGHTPAREN }
+                types = { default.value_separator, default.primitive_end }
             elif current.type == Lexer.Token.INT:
                 parameters.append(int(lexer.str(current)))
 
-                types = { Lexer.Token.COMMA, Lexer.Token.RIGHTPAREN }
+                types = { default.value_separator, default.primitive_end }
             elif current.type == Lexer.Token.STRING:
                 string = lexer.str(current)
                 if len(string) == 0:
@@ -47,11 +36,11 @@ class Parser:
 
                 parameters.append(string)
 
-                types = { Lexer.Token.COMMA, Lexer.Token.RIGHTPAREN }
-            elif current.type == Lexer.Token.COMMA:
+                types = { default.value_separator, default.primitive_end }
+            elif current.type == default.value_separator:
                 types = { Lexer.Token.FLOAT, Lexer.Token.INT, Lexer.Token.IDENTIFIER, Lexer.Token.STRING }
-            elif current.type == Lexer.Token.RIGHTPAREN:
-                if lexer.next().type not in [Lexer.Token.DOT, Lexer.Token.SEMICOLON]:
+            elif current.type == default.primitive_end:
+                if lexer.next().type != default.primitive_separator:
                     return None
 
                 break
@@ -60,14 +49,12 @@ class Parser:
 
             current = lexer.next()
 
-        arity = len(parameters)
-
-        return Parser.create_primitive(name, arity, parameters)
+        return Primitive.from_list([name] + parameters)
 
     @staticmethod
-    def parse(code: str) -> Group:
+    def parse(code: str) -> PrimitiveGroup:
         lexer = Lexer(code)
-        primitives = Group()
+        primitives = PrimitiveGroup()
         stack = [primitives]
 
         parse_next_master = False
@@ -76,15 +63,15 @@ class Parser:
             if current.type == Lexer.Token.OPERATOR and lexer.str(current) == "!":
                 parse_next_master = True
             elif current.type == Lexer.Token.IDENTIFIER:
-                primitive = Parser.parse_primitive(lexer, current)
+                primitive = PrimitiveParser.parse_primitive(lexer, current)
                 if primitive is not None:
                     stack[-1].append(primitive)
                     if parse_next_master:
-                        stack[-1].set_master(primitive)
+                        stack[-1].master = primitive
                         parse_next_master = False
-            elif current.type == Lexer.Token.LEFTCURL:
-                stack.append(Group())
-            elif current.type == Lexer.Token.RIGHTCURL:
+            elif current.type == default.primitive_group_begin:
+                stack.append(PrimitiveGroup())
+            elif current.type == default.primitive_group_end:
                 if len(stack) == 1:
                     return primitives
 
@@ -96,19 +83,3 @@ class Parser:
             current = lexer.next()
 
         return primitives
-
-if __name__ == '__main__':
-    r = Parser.parse("""
-        line(10, 10, 10, 10). 
-        !p(10).
-        { 
-            rect(20, 20, 20, 20). 
-            !p(2).
-            {
-                !snoepie(poepie).
-            }
-        }
-    """)
-    print(r.master())
-    print(r[1].master())
-    print(r[2].master())
