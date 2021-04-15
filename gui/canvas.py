@@ -3,6 +3,7 @@ from typing import *
 import math
 
 import imgui
+import numpy as np
 
 from gui.graphics import Bounds, Point
 from gui.primitives import PrimitiveGroup, Renderable
@@ -48,6 +49,9 @@ class Selection:
 
     def is_single_selection(self) -> bool:
         return len(self.renderables) == 1
+
+    def is_multi_selection(self) -> bool:
+        return len(self.renderables) > 1
 
     def first(self):
         result, = self.renderables
@@ -159,11 +163,20 @@ class Canvas:
                 p1.x * self.scale + offset.x,
                 p1.y * -self.scale + offset.y,
                 imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
-            draw_list.add_circle_filled(
-                p1.x * self.scale + offset.x,
-                p1.y * -self.scale + offset.y,
-                4 * self.scale,
-                imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
+
+            direction = p1 - p0
+            length = direction.length()
+            if length == 0:
+                return
+            direction /= (length / self.handle_size)
+
+            points = np.array([
+                [p1.x * self.scale + offset.x, p1.y * -self.scale + offset.y],
+                [(p1.x - direction.y - 2 * direction.x) * self.scale + offset.x, (p1.y + direction.x - 2 * direction.y) * -self.scale + offset.y],
+                [(p1.x + direction.y - 2 * direction.x) * self.scale + offset.x, (p1.y - direction.x - 2 * direction.y) * -self.scale + offset.y]
+            ])
+            draw_list.add_convex_poly_filled(points, imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
+
 
     def render_grid(self, draw_list, offset: Point, position_min: Point, position_max: Point, grid_step=64):
         for x in util.frange(math.fmod(offset.x, grid_step * self.scale), position_max.x - position_min.x, grid_step * self.scale):
@@ -206,7 +219,7 @@ class Canvas:
             return
 
         for index, primitive in enumerate(reversed(group)):
-            if self.intersected_point in primitive.bounds() * self.scale:
+            if self.intersected_point in primitive.bounds():
                 self.intersected_renderable = len(group) - index - 1
                 break
 
@@ -278,15 +291,45 @@ class Canvas:
 
     def group_selection(self):
         current_group = self.primitives.find(self.selected_group)
-        old_group_primitives = [primitive for primitive in current_group]
-        new_group_primitives = [current_group[renderable] for renderable in self.selected_renderables]
+        if self.selected_renderables.is_single_selection():
+            primitive = current_group[self.selected_renderables.first()]
+            if isinstance(primitive, PrimitiveGroup):
+                current_group.remove(primitive)
+                for child in primitive:
+                    current_group.append(child)
+            else:
+                current_group.remove(primitive)
+                new_group = PrimitiveGroup(self.reference_factory.new(), primitive)
+                current_group.append(new_group)
+        elif self.selected_renderables.is_multi_selection():
+            new_group_primitives = [current_group[renderable] for renderable in self.selected_renderables]
 
-        current_group.reset()
-        for primitive in old_group_primitives:
-            if primitive not in new_group_primitives:
-                current_group.append(primitive)
+            current_group.remove(*new_group_primitives)
 
-        new_group = PrimitiveGroup(self.reference_factory.new(), *new_group_primitives)
-        current_group.append(new_group)
+            new_group = PrimitiveGroup(self.reference_factory.new(), *new_group_primitives)
+            current_group.append(new_group)
 
         self.reset_selection()
+
+    def delete_selection(self):
+        current_group = self.primitives.find(self.selected_group)
+        selection = [current_group[renderable] for renderable in self.selected_renderables]
+        if len(selection) == len(current_group):
+            parent = self.primitives.parent(self.selected_group)
+            if parent is not None:
+                parent.remove(current_group)
+
+        current_group.remove(*selection)
+
+        self.reset_selection()
+
+    def append(self, primitive):
+        current_group = self.primitives.find(self.selected_group)
+        current_group.append(primitive)
+
+    def duplicate_selection(self):
+        current_group = self.primitives.find(self.selected_group)
+        for renderable in self.selected_renderables:
+            current_group.append(current_group[renderable].copy(self.reference_factory))
+
+

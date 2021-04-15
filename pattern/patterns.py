@@ -17,7 +17,7 @@ class ParameterFlags:
     _float = 2
     _str = 4
 
-    def __init__(self, parameters: Sequence[Union[float, str, int]]):
+    def __init__(self, parameters: Primitive.Parameters):
         self.value = ParameterFlags._none
         self.dtype = None
         for parameter in parameters:
@@ -175,7 +175,7 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
             if not util.equal_tolerant(parameters[i - 1] + delta, parameters[i], abs(tolerance * delta)):
                 return None
 
-        true_parameters = np.arange(start, start + len(parameters) * delta, delta)
+        true_parameters = np.array([start + i * delta for i in range(len(parameters))])
         confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
 
         return LinearPattern(delta, confidence, tolerance)
@@ -296,8 +296,10 @@ class Operator:
     Operators = List[Union[Plus, Min, Mul, Div]]
 
 
-
 class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
+    zero_safe_operations = [Operator.Min, Operator.Plus]
+    zero_unsafe_operations = [Operator.Min, Operator.Plus, Operator.Div, Operator.Mul]
+
     def __init__(self, operators: Operator.Operators, values: Primitive.Parameters, confidence: float = default.confidence, tolerance: float = default.tolerance):
         self.operators: Operator.Operators = operators
         self.values: Primitive.Parameters = values
@@ -305,12 +307,9 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
         self.tolerance: float = tolerance
 
     def __str__(self) -> str:
-        return "{}{}{}{}{}".format(
+        return "{}{}".format(
             self.name(),
-            default.tokens[default.parameter_pattern_begin],
-            util.format_list(self.operators, str, default.tokens[default.parameter_pattern_begin], default.tokens[default.value_separator], default.tokens[default.parameter_pattern_end]),
-            util.format_list(self.values, str, default.tokens[default.parameter_pattern_begin], default.tokens[default.value_separator], default.tokens[default.parameter_pattern_end]),
-            default.tokens[default.parameter_pattern_end])
+            util.format_list(self.operators + self.values, str, default.tokens[default.parameter_pattern_begin], default.tokens[default.value_separator], default.tokens[default.parameter_pattern_end]))
 
 
     def __repr__(self) -> str:
@@ -362,27 +361,32 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             if util.all_same(new_parameters, new_parameters[0] * tolerance):
                 # TODO confidence
                 confidence = 1.0
-                operators, values = expand_history(history, None, new_parameters[-1])
+                operators, values = expand_history(history, None, new_parameters[0])
                 return BFSOperatorPattern(operators, values, confidence, tolerance)
 
             if len(new_parameters) == 2:
                 continue
 
             if any(new_parameter == 0 for new_parameter in new_parameters):
-                operations = [Operator.Min, Operator.Plus]
+                operations = BFSOperatorPattern.zero_safe_operations
             else:
-                operations = [Operator.Min, Operator.Plus, Operator.Div, Operator.Mul]
+                operations = BFSOperatorPattern.zero_unsafe_operations
 
             for new_operation in operations:
-                queue.append((new_operation, new_parameters, expand_history(history, new_operation, new_parameters[-1])))
+                queue.append((new_operation, new_parameters, expand_history(history, new_operation, new_parameters[0])))
 
         return None
 
     def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
         values = self.values.copy()
+        # for _ in range(nth):
+        #     for i in range(len(self.operators) - 1, -1, -1):
+        #         values[i] = self.operators[i].next(values[i + 1], values[i])
+
         for _ in range(nth):
-            for i in range(len(self.operators) - 1, -1, -1):
+            for i in range(len(self.operators)):
                 values[i] = self.operators[i].next(values[i + 1], values[i])
+
         #TODO update
         return values[0]
 

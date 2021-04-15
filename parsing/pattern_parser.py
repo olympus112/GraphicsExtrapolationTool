@@ -46,7 +46,7 @@ class PatternParser:
         self.variables[name] = value
 
 
-    def parse_identifier(self, token: Lexer.Token, _parse_identifier: bool) -> Tuple[ReferenceFactory.Reference, Lexer.Token]:
+    def parse_identifier(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_identifier: bool) -> Tuple[ReferenceFactory.Reference, Lexer.Token]:
         if _parse_identifier:
             if token.type == default.identifier:
                 if token.type != default.identifier:
@@ -57,7 +57,7 @@ class PatternParser:
                     return -1, token
 
                 identifier = int(self.lexer.str(token))
-                InstancePattern.referenceFactory.reserve(identifier)
+                reference_factory.reserve(identifier)
 
                 return identifier, self.lexer.next()
             else:
@@ -65,16 +65,16 @@ class PatternParser:
         else:
             return -1, token
 
-    def parse_instance_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[InstancePattern]:
+    def parse_instance_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_identifier: bool = True) -> Optional[InstancePattern]:
         if token.type == default.variable:
             self.parse_variable_assignment(token)
-            return self.parse_instance_pattern(self.lexer.next(), _parse_identifier=_parse_identifier)
+            return self.parse_instance_pattern(self.lexer.next(), reference_factory, _parse_identifier)
 
-        identifier, token = self.parse_identifier(token, _parse_identifier)
+        identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier=_parse_identifier)
         if token.type == default.group_pattern_parent_begin:
-            pattern = self.parse_group_pattern(token, False)
+            pattern = self.parse_group_pattern(token, reference_factory, _parse_identifier=False)
         elif token.type == default.primitive_pattern_begin:
-            pattern = self.parse_primitive_pattern(token, _parse_identifier=False)
+            pattern = self.parse_primitive_pattern(token, reference_factory, _parse_identifier=False)
         else:
             pattern = None
 
@@ -83,14 +83,14 @@ class PatternParser:
 
         return pattern
 
-    def parse_group_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[GroupPattern]:
-        identifier, token = self.parse_identifier(token, _parse_identifier)
+    def parse_group_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory,  _parse_identifier: bool = True) -> Optional[GroupPattern]:
+        identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier)
 
         if token.type != default.group_pattern_parent_begin:
             return None
 
         parent_begin = self.lexer.next()
-        parent = self.parse_primitive_pattern(parent_begin, _parse_identifier=True)
+        parent = self.parse_primitive_pattern(parent_begin, reference_factory, _parse_identifier=True)
         if parent is None:
             return None
 
@@ -111,7 +111,7 @@ class PatternParser:
                 return None
 
             if token.type == default.primitive_pattern_begin or token.type == default.group_pattern_parent_begin or token.type == default.identifier:
-                pattern = self.parse_instance_pattern(token, _parse_identifier=True)
+                pattern = self.parse_instance_pattern(token, reference_factory, _parse_identifier=True)
                 patterns.append(pattern)
 
                 types = { default.value_separator, default.group_pattern_children_end }
@@ -128,8 +128,8 @@ class PatternParser:
 
             token = self.lexer.next()
 
-    def parse_primitive_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[PrimitivePattern]:
-        identifier, token = self.parse_identifier(token, _parse_identifier=_parse_identifier)
+    def parse_primitive_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_identifier: bool = True) -> Optional[PrimitivePattern]:
+        identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier=_parse_identifier)
 
         if token.type != default.primitive_pattern_begin:
             return None
@@ -205,25 +205,25 @@ class PatternParser:
         return Pattern.from_list(name, parameters)
 
 
-    def add_identifiers(self, pattern: InstancePattern):
+    def add_identifiers(self, pattern: InstancePattern, reference_factory: ReferenceFactory):
         if pattern.identifier == -1:
-            pattern.identifier = InstancePattern.referenceFactory.new()
+            pattern.identifier = reference_factory.new()
 
         if isinstance(pattern, GroupPattern):
             if pattern.intergroup_pattern.identifier == -1:
-                pattern.intergroup_pattern.identifier = InstancePattern.referenceFactory.new()
+                pattern.intergroup_pattern.identifier = reference_factory.new()
 
             for child in pattern:
-                self.add_identifiers(child)
+                self.add_identifiers(child, reference_factory)
 
 
-    def parse(self) -> Optional[InstancePattern]:
+    def parse(self, reference_factory: ReferenceFactory = ReferenceFactory()) -> Optional[InstancePattern]:
         self.lexer.reset()
 
         token = self.lexer.next()
-        pattern = self.parse_instance_pattern(token, _parse_identifier=True)
+        pattern = self.parse_instance_pattern(token, reference_factory, _parse_identifier=True)
 
         if pattern is not None:
-            self.add_identifiers(pattern)
+            self.add_identifiers(pattern, reference_factory)
 
         return pattern

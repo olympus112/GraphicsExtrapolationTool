@@ -43,13 +43,14 @@ class Screen:
         self.query = ""
         self.query_results = []
 
-        self.extrapolations = 2
+        self.extrapolations = []
         self.tolerance = 0.1
         self.found_patterns: Optional[InstancePattern] = None
         self.available_patterns = [ConstantPattern, LinearPattern, BFSOperatorPattern, PeriodicPattern, SinusoidalPattern]
         self.selected_patterns = [True for _ in self.available_patterns]
         self.render_order = False
         self.render_identifiers = False
+        self.extract_constants = True
 
         self.camera_offset = Point(64 * 4.5, 64 * 2.65)
         self.scale_index = 0
@@ -251,10 +252,13 @@ class Screen:
         imgui.text("offset x: {}, offset y: {}".format(self.camera_offset.x, self.camera_offset.y))
         imgui.text("scale: {}".format(self.icanvas.scale))
 
-        _, self.extrapolations = imgui.drag_int("Extrapolations", self.extrapolations)
+        any_changed = False
+        if self.found_patterns is not None:
+            for i in range(self.found_patterns.level):
+                changed, self.extrapolations[i] = imgui.drag_int("Extrapolation {}".format(i + 1), self.extrapolations[i], 0.2, 1, 1000)
+                any_changed |= changed
         _, self.tolerance = imgui.drag_float("Tolerance", self.tolerance)
 
-        any_changed = False
         for index, pattern in enumerate(self.available_patterns):
             changed, self.selected_patterns[index] = imgui.checkbox(str(pattern), self.selected_patterns[index])
             any_changed |= changed
@@ -268,11 +272,9 @@ class Screen:
         if any_changed:
             self.icanvas_to_all()
 
-        if imgui.button("Extract constants", -1):
-            if len(self.opatterns) != 0:
-                constants, counter = Lexer.extract_constants(self.opatterns)
-                self.opatterns = self.replace_constants(self.opatterns, constants, counter)
-                self.opatterns_to_all()
+        changed, self.extract_constants = imgui.checkbox("Extract constants", self.extract_constants)
+        if changed:
+            self.icanvas_to_all()
 
         for entry in self.console:
             imgui.text_colored('{} (x{})'.format(entry[0], entry[1]), *entry[2])
@@ -393,7 +395,7 @@ class Screen:
 
         # Mouse press event
         if left_pressed and hovered:
-            self.icanvas.mouse_press(mouse_position_in_canvas, _control=imgui.get_io().key_ctrl)
+            self.icanvas.mouse_press(mouse_position_in_canvas, _control=imgui.get_io().key_ctrl or imgui.get_io().key_shift)
         if left_dragging and hovered:
             self.icanvas.mouse_drag(mouse_position_in_canvas)
             self.icanvas_to_all()
@@ -406,7 +408,7 @@ class Screen:
             imgui.open_popup("context")
         if imgui.begin_popup("context"):
             if imgui.menu_item("Add rectangle")[0]:
-                self.icanvas.primitives.append(Rect(
+                self.icanvas.append(Rect(
                     self.icanvas.reference_factory.new(),
                     4,
                     int(mouse_position_in_canvas.x - 25),
@@ -415,7 +417,7 @@ class Screen:
                     50))
                 self.icanvas_to_all()
             if imgui.menu_item("Add line")[0]:
-                self.icanvas.primitives.append(Line(
+                self.icanvas.append(Line(
                     self.icanvas.reference_factory.new(),
                     4,
                     int(mouse_position_in_canvas.x - 25),
@@ -424,7 +426,7 @@ class Screen:
                     int(mouse_position_in_canvas.y + 25)))
                 self.icanvas_to_all()
             if imgui.menu_item("Add vector")[0]:
-                self.icanvas.primitives.append(Vector(
+                self.icanvas.append(Vector(
                     self.icanvas.reference_factory.new(),
                     4,
                     int(mouse_position_in_canvas.x),
@@ -433,7 +435,7 @@ class Screen:
                     100))
                 self.icanvas_to_all()
             if imgui.menu_item("Add circle")[0]:
-                self.icanvas.primitives.append(Circle(
+                self.icanvas.append(Circle(
                     self.icanvas.reference_factory.new(),
                     3,
                     int(mouse_position_in_canvas.x),
@@ -487,11 +489,19 @@ class Screen:
                 self.show_file_loader = not self.show_file_loader
             if imgui.is_key_pressed(glfw.KEY_S):
                 self.show_file_saver = not self.show_file_saver
-            if imgui.is_key_pressed(glfw.KEY_G):
+            if imgui.is_key_pressed(glfw.KEY_G) and imgui.get_io().key_ctrl:
                 self.icanvas.group_selection()
+                self.icanvas_to_all()
+            if imgui.is_key_pressed(glfw.KEY_DELETE):
+                self.icanvas.delete_selection()
+                self.icanvas_to_all()
+            if imgui.is_key_pressed(glfw.KEY_D) and imgui.get_io().key_ctrl:
+                self.icanvas.duplicate_selection()
+                self.icanvas_to_all()
+
 
         # if not imgui.get_io().want_capture_mouse:
-        if imgui.get_io().mouse_wheel != 0:
+        if imgui.get_io().mouse_wheel != 0 and imgui.get_io().want_capture_mouse:
             if imgui.get_io().key_shift:
                 self.tolerance = util.clamp(self.tolerance + 0.1 * imgui.get_io().mouse_wheel, 0.0, 5.0)
             elif imgui.get_io().key_ctrl:
@@ -500,7 +510,8 @@ class Screen:
                 self.icanvas.scale = new_scale
                 self.ocanvas.scale = new_scale
             else:
-                self.extrapolations = int(max(0, self.extrapolations + imgui.get_io().mouse_wheel))
+                for i in range(len(self.extrapolations)):
+                    self.extrapolations[i] = int(max(1, self.extrapolations[i] + imgui.get_io().mouse_wheel))
 
             self.found_patterns_to_ocanvas()
 
@@ -525,7 +536,9 @@ class Screen:
         self.otext = str(self.ocanvas)
 
     def icanvas_to_found_patterns(self):
-        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.available_patterns, self.tolerance)
+        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.available_patterns, self.tolerance, ReferenceFactory())
+        if self.found_patterns is not None and len(self.extrapolations) < self.found_patterns.level:
+            self.extrapolations.extend([1] * (self.found_patterns.level - len(self.extrapolations)))
 
     def found_patterns_to_opatterns(self):
         if self.found_patterns is not None:
@@ -545,16 +558,22 @@ class Screen:
         self.ocanvas.reset()
 
         if self.found_patterns is None:
+            self.handle_error("No patterns found")
             return
 
         master = self.icanvas.primitives.master
         if master is None:
+            self.handle_error("No master in icanvas")
             return
 
-        primitives = Pattern.next([master], self.found_patterns, [self.extrapolations] * self.found_patterns.level, self.ocanvas.reference_factory)
-        for primitive in primitives:
-            if primitive is not None:
-                self.ocanvas.primitives.append(primitive)
+        try:
+            primitives = Pattern.next([master], self.found_patterns, self.extrapolations[:self.found_patterns.level], self.ocanvas.reference_factory)
+
+            for primitive in primitives:
+                if primitive is not None:
+                    self.ocanvas.primitives.append(primitive)
+        except Exception as error:
+            self.handle_error(error)
 
         self.ocanvas_to_otext()
 
@@ -562,6 +581,7 @@ class Screen:
         self.icanvas_to_itext()
         self.icanvas_to_found_patterns()
         self.found_patterns_to_opatterns()
+        self.opatterns_extract_constants()
         self.found_patterns_to_ocanvas()
 
     def itext_to_all(self):
@@ -573,6 +593,11 @@ class Screen:
     def opatterns_to_all(self):
         self.opatterns_to_found_patterns()
         self.found_patterns_to_ocanvas()
+
+    def opatterns_extract_constants(self):
+        if self.extract_constants:
+            constants, counter = Lexer.extract_constants(self.opatterns)
+            self.opatterns = self.replace_constants(self.opatterns, constants, counter)
 
     def handle_error(self, error):
         error_str = str(error)
@@ -590,7 +615,7 @@ class Screen:
                 continue
 
             if value not in new_vars.keys():
-                new_vars[value] = "var{}".format(len(new_vars))
+                new_vars[value] = "v{}".format(len(new_vars))
 
             string = string[:token.start] + new_vars[value] + string[token.start + token.length:]
 

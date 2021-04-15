@@ -34,3 +34,10 @@ class PatternTests(TestCase):
 
         # Pattern.search_group_recursive(Parser.parse(code2), [ConstantPattern, LinearPattern], 0.1).print()
         # Pattern.search_group_recursive(Parser.parse(code3), [ConstantPattern, LinearPattern], 0.1).print()
+
+    def test_bfs(self):
+        # numbers = np.array([3, 7, 15, 31])
+        numbers = np.array([2, 3, 6, 15])
+        result = BFSOperatorPattern.apply(numbers, ParameterFlags(numbers), tolerance=0)
+        print(result)
+        print(result.next(3, 2))

@@ -8,7 +8,6 @@ from misc.util import *
 from misc import default
 
 class Renderable(ABC):
-    referenceFactory = ReferenceFactory()
 
     def __init__(self, identifier: ReferenceFactory.Reference):
         self._identifier = identifier
@@ -95,6 +94,9 @@ class Primitive(Renderable):
     def static_arity() -> List[int]:
         pass
 
+    def copy(self, reference_factory: ReferenceFactory) -> PrimitiveGroup.Parameter:
+        return self.from_list(reference_factory.new(), self.name, self.parameters)
+
 class PrimitiveGroup(Renderable):
     Parameter = Union[Primitive, "PrimitiveGroup"]
     Parameters = List[Parameter]
@@ -102,11 +104,14 @@ class PrimitiveGroup(Renderable):
     def __init__(self, identifier: ReferenceFactory.Reference, *primitives: PrimitiveGroup.Parameter):
         super(PrimitiveGroup, self).__init__(identifier)
 
-        self._arity: int = len(primitives)
-        self.primitives: PrimitiveGroup.Parameters = [*primitives]
+        self._arity: int = 0
+        self.primitives: List[PrimitiveGroup.Parameter] = []
         self._master: Optional[Primitive] = None
         self._min_arity: Optional[int] = None
         self._max_arity: Optional[int] = None
+
+        for primitive in primitives:
+            self.append(primitive)
 
     def __str__(self) -> str:
         return format_list(self.primitives, str, default.tokens[default.primitive_group_begin], '', default.tokens[default.primitive_group_end], ' ')
@@ -161,12 +166,22 @@ class PrimitiveGroup(Renderable):
             self._update_min_arity(primitive.master.arity)
             self._update_max_arity(primitive.master.arity)
 
-    def reset(self):
-        self._arity: int = 0
-        self.primitives: PrimitiveGroup.Parameters = []
+    def remove(self, *primitives: PrimitiveGroup.Parameter):
+        for primitive in primitives:
+            self.primitives.remove(primitive)
+
         self._master: Optional[Primitive] = None
-        self._min_arity: Optional[int] = None
-        self._max_arity: Optional[int] = None
+        self._min_arity = None
+        self._max_arity = None
+        self._arity = 0
+
+        for primitive in self.primitives:
+            if self._arity == 0:
+                self._master = primitive.master
+
+            self._update_min_arity(primitive.master.arity)
+            self._update_max_arity(primitive.master.arity)
+            self._arity += 1
 
     def append(self, parameter: PrimitiveGroup.Parameter):
         if self.arity == 0:
@@ -194,6 +209,22 @@ class PrimitiveGroup(Renderable):
 
         return None
 
+    def parent(self, item: ReferenceFactory.Reference) -> Optional[PrimitiveGroup.Parameter]:
+        for primitive in self.primitives:
+            if primitive.identifier == item:
+                return self
+
+            if isinstance(primitive, PrimitiveGroup):
+                result = primitive.find(item)
+
+                if result is not None:
+                    return result
+
+    def copy(self, reference_factory: ReferenceFactory) -> PrimitiveGroup.Parameter:
+        primitives = [primitive.copy(reference_factory) for primitive in self.primitives]
+
+        return PrimitiveGroup(reference_factory.new(), *primitives)
+
     def move(self, position: Point):
         for primitive in self.primitives:
             primitive.move(position)
@@ -219,6 +250,8 @@ class PrimitiveGroup(Renderable):
 
 
 class Rect(Primitive):
+    width = 50
+    height = 50
 
     def __init__(self, identifier: ReferenceFactory.Reference, arity: int, *parameters: Primitive.Parameter):
         super(Rect, self).__init__(identifier, Rect.static_name(), arity, *parameters)
@@ -229,27 +262,49 @@ class Rect(Primitive):
 
     @staticmethod
     def static_arity() -> List[int]:
-        return [4, 5]
+        return [2, 3, 4, 5]
+
+    def get_size(self) -> Tuple[Primitive.Parameter, Primitive.Parameter]:
+        if self.arity == 2:
+            width = Rect.width
+            height = Rect.height
+        elif self.arity == 3:
+            width = self[2]
+            height = self[2]
+        else:
+            width = self[2]
+            height = self[3]
+
+        return width, height
 
     def move(self, delta: Point):
         self[0] += delta.x
         self[1] += delta.y
 
     def position(self) -> Point:
-        x = self[0] + self[2] / 2
-        y = self[1] + self[3] / 2
+        width, height = self.get_size()
+
+        x = self[0] + width / 2
+        y = self[1] + height / 2
         return Point(x, y)
 
     def bounds(self) -> Bounds:
-        return Bounds(Point(self[0], self[1]), Point(self[0] + self[2], self[1] + self[3]))
+        width, height = self.get_size()
+
+        return Bounds(Point(self[0], self[1]), Point(self[0] + width, self[1] + height))
 
     def handles(self) -> List[Point]:
-        return [Point(self[0] + self[2], self[1] + self[3])]
+        width, height = self.get_size()
+
+        return [Point(self[0] + width, self[1] + height)]
 
     def handle(self, index: int, position: Point):
         if index == 0:
-            self[2] = int(position.x - self[0])
-            self[3] = int(position.y - self[1])
+            if self.arity == 3:
+                self[2] = (position - self.position()).length() * math.sqrt(2)
+            elif self.arity > 3:
+                self[2] = int(position.x - self[0])
+                self[3] = int(position.y - self[1])
 
     def render(self, draw_list: Any, offset: Point, scale: int, factor: float = 1.0):
         if self.arity == 5:
@@ -257,10 +312,11 @@ class Rect(Primitive):
         else:
             color = imgui.get_color_u32_rgba(default.r * factor, default.g * factor, default.b * factor, default.a)
 
+        width, height = self.get_size()
         draw_list.add_rect_filled(self[0] * scale + offset.x,
                                   self[1] * -scale + offset.y,
-                                  (self[0] + self[2]) * scale + offset.x,
-                                  (self[1] + self[3]) * -scale + offset.y,
+                                  (self[0] + width) * scale + offset.x,
+                                  (self[1] + height) * -scale + offset.y,
                                   color)
 
 

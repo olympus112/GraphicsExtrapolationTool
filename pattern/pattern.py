@@ -5,19 +5,12 @@ from gui.primitives import PrimitiveGroup, Primitive
 from misc.util import ReferenceFactory
 
 class InstancePattern:
-    referenceFactory = ReferenceFactory()
 
-    def __init__(self, identifier: Optional[ReferenceFactory.Reference] = None):
-        if identifier is None:
-            self._identifier: ReferenceFactory.Reference = InstancePattern.referenceFactory.new()
-        else:
-            self._identifier = identifier
+    def __init__(self, identifier: Optional[ReferenceFactory.Reference]):
+        self._identifier = identifier
 
         self.parent: Optional[GroupPattern] = None
         self._level: int = 1
-
-    def __del__(self):
-        del self.identifier
 
     @property
     def identifier(self) -> ReferenceFactory.Reference:
@@ -25,13 +18,7 @@ class InstancePattern:
 
     @identifier.setter
     def identifier(self, value: ReferenceFactory.Reference):
-        del self.identifier
         self._identifier = value
-
-    @identifier.deleter
-    def identifier(self):
-        InstancePattern.referenceFactory.release(self._identifier)
-        self._identifier = None
 
     @property
     def level(self) -> int:
@@ -52,7 +39,8 @@ class PrimitivePattern(InstancePattern):
         self.patterns: List[ParameterPattern] = [*patterns]
 
     def __str__(self) -> str:
-        result = "{}{}".format(default.tokens[default.identifier], self._identifier)
+        result = ""
+        # result += "{}{}".format(default.tokens[default.identifier], self._identifier)
         result += util.format_list(self.patterns, str, default.tokens[default.primitive_pattern_begin], default.tokens[default.value_separator], default.tokens[default.primitive_pattern_end])
 
         return result
@@ -81,7 +69,8 @@ class PrimitivePattern(InstancePattern):
                     output_parameter = input_parameters[index] # Todo fix
                 else:
                     output_parameter = pattern.next(input_parameters[index], nth)
-                parameters.append(output_parameter)
+                    # Todo check
+                parameters.append(round(output_parameter, 2) if isinstance(output_parameter, float) else output_parameter)
 
             return Primitive.from_list(reference_factory.new(), parameters[0], parameters[1:])
 
@@ -98,7 +87,8 @@ class GroupPattern(InstancePattern):
         self.intragroup_patterns: List[InstancePattern] = []
 
     def __str__(self) -> str:
-        result = "{}{}".format(default.tokens[default.identifier], self._identifier)
+        result = ""
+        # result += "{}{}".format(default.tokens[default.identifier], self._identifier)
         result += default.tokens[default.group_pattern_parent_begin] + str(self.intergroup_pattern) + default.tokens[default.group_pattern_parent_end]
         result += util.format_list(self.intragroup_patterns, str, default.tokens[default.group_pattern_children_begin], default.tokens[default.value_separator], default.tokens[default.group_pattern_children_end])
 
@@ -152,12 +142,30 @@ class GroupPattern(InstancePattern):
 class Pattern:
     @staticmethod
     def from_list(name: str, parameters: Primitive.Parameters) -> Optional[ParameterPattern]:
-        for pattern in [ConstantPattern, LinearPattern]:
+        for pattern in [ConstantPattern, LinearPattern, SinusoidalPattern]:
             if name == pattern.name():
                 return pattern(*parameters)
 
         if name == PeriodicPattern.name():
             return PeriodicPattern(parameters)
+
+        if name == BFSOperatorPattern.name():
+            operators = []
+            for parameter in parameters:
+                if isinstance(parameter, str):
+                    for operator in BFSOperatorPattern.zero_unsafe_operations:
+                        if parameter == str(operator):
+                            operators.append(operator)
+                            break
+                    else:
+                        return None
+                else:
+                    if len(operators) == 0:
+                        return None
+
+                    break
+
+            return BFSOperatorPattern(operators, parameters[len(operators) : 2 * len(operators) + 1], *parameters[2 * len(operators) + 1:])
 
         return None
 
@@ -176,7 +184,10 @@ class Pattern:
         elif isinstance(pattern, GroupPattern):
             result = []
             for start_primitive in start_primitives:
-                new_start_primitives = pattern.intergroup_pattern.next(start_primitive, list(range(extrapolation)), reference_factory)
+                if pattern.intergroup_pattern is not None:
+                    new_start_primitives = pattern.intergroup_pattern.next(start_primitive, list(range(extrapolation)), reference_factory)
+                else:
+                    new_start_primitives = [start_primitive]
                 for index, new_start_primitive in enumerate(new_start_primitives):
                     result += Pattern.next([new_start_primitive], pattern[index % len(pattern.intragroup_patterns)], extrapolations.copy())
 
@@ -186,31 +197,31 @@ class Pattern:
             raise Exception()
 
     @staticmethod
-    def search_group_recursive(root: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[Union[GroupPattern, PrimitivePattern]]:
+    def search_group_recursive(root: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float, reference_factory: ReferenceFactory) -> Optional[Union[GroupPattern, PrimitivePattern]]:
         if root is None:
             return None
 
-        primitive_pattern = Pattern.search_group(root, available_patterns, tolerance)
+        primitive_pattern = Pattern.search_group(root, available_patterns, tolerance, reference_factory)
         group_pattern = primitive_pattern
 
         for group in root:
             if not isinstance(group, PrimitiveGroup):
                 continue
 
-            subpattern = Pattern.search_group_recursive(group, available_patterns, tolerance)
+            subpattern = Pattern.search_group_recursive(group, available_patterns, tolerance, reference_factory)
             if subpattern is None:
                 return None
 
             if group_pattern is primitive_pattern:
-                group_pattern = GroupPattern(primitive_pattern)
+                group_pattern = GroupPattern(primitive_pattern, reference_factory.new())
 
             group_pattern.append(subpattern)
 
         return group_pattern
 
     @staticmethod
-    def search_group(group: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[PrimitivePattern]:
-        if group is None:
+    def search_group(group: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float, reference_factory: ReferenceFactory) -> Optional[PrimitivePattern]:
+        if group is None or group.max_arity is None:
             return None
 
         parameters_list = [[] for _ in range(group.max_arity + 1)]
@@ -219,7 +230,7 @@ class Pattern:
             for parameter_index, parameter in enumerate(primitive.master.parameters):
                 parameters_list[parameter_index + 1].append(parameter)
 
-        primitive_pattern = PrimitivePattern()
+        primitive_pattern = PrimitivePattern(identifier=reference_factory.new())
         for parameters in parameters_list:
             found_pattern = Pattern.search_parameters(parameters, available_patterns, tolerance)
             if found_pattern is None:
@@ -246,8 +257,8 @@ class Pattern:
         return None
 
     @staticmethod
-    def search(start_primitive: Primitive, root: PrimitiveGroup, available_patterns: List[ParameterPattern], extrapolations: List[int], tolerance: float) -> Tuple[Optional[InstancePattern], Optional[List[Primitive]]]:
-        patterns = Pattern.search_group_recursive(root, available_patterns, tolerance)
+    def search(start_primitive: Primitive, root: PrimitiveGroup, available_patterns: List[ParameterPattern], extrapolations: List[int], tolerance: float, reference_factory: ReferenceFactory = ReferenceFactory()) -> Tuple[Optional[InstancePattern], Optional[List[Primitive]]]:
+        patterns = Pattern.search_group_recursive(root, available_patterns, tolerance, reference_factory)
         if patterns is None:
             return None, None
 
