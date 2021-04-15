@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from patterns import *
-from parsing.primitive_parser import PrimitiveParser
+from pattern.patterns import *
 from gui.primitives import PrimitiveGroup, Primitive
 from misc.util import ReferenceFactory
 
-class PrimitivePattern:
+class InstancePattern:
     referenceFactory = ReferenceFactory()
 
-    def __init__(self):
-        self._identifier: ReferenceFactory.Reference = PrimitivePattern.referenceFactory.new()
+    def __init__(self, identifier: Optional[ReferenceFactory.Reference] = None):
+        if identifier is None:
+            self._identifier: ReferenceFactory.Reference = InstancePattern.referenceFactory.new()
+        else:
+            self._identifier = identifier
+
         self.parent: Optional[GroupPattern] = None
         self._level: int = 1
 
@@ -27,25 +30,30 @@ class PrimitivePattern:
 
     @identifier.deleter
     def identifier(self):
-        PrimitivePattern.referenceFactory.release(self._identifier)
+        InstancePattern.referenceFactory.release(self._identifier)
         self._identifier = None
 
     @property
     def level(self) -> int:
         return self._level
 
+    @abstractmethod
+    def print(self, depth: int = 0, _format: Union[str, repr] = str):
+        pass
 
-class InstancePattern(PrimitivePattern):
-    def __init__(self, *patterns):
-        super(InstancePattern, self).__init__()
-        self.patterns: Sequence[ParameterPattern] = [*patterns]
+    @abstractmethod
+    def next(self, start: Primitive, nths: Union[int, List[int]], reference_factory: ReferenceFactory) -> List[Primitive]:
+        pass
+
+
+class PrimitivePattern(InstancePattern):
+    def __init__(self, *patterns, identifier: Optional[ReferenceFactory.Reference] = None):
+        super(PrimitivePattern, self).__init__(identifier)
+        self.patterns: List[ParameterPattern] = [*patterns]
 
     def __str__(self) -> str:
-        result = "{}{}".format(default.tokens[default.reference], self._identifier)
-        if self.parent is not None:
-            result += "{}{}".format(default.tokens[default.parent], self.parent.identifier)
-        if len(self.patterns) > 0:
-            result += util.format_list(self.patterns, str, default.tokens[default.instance_pattern_begin], default.tokens[default.value_separator], default.tokens[default.instance_pattern_end])
+        result = "{}{}".format(default.tokens[default.identifier], self._identifier)
+        result += util.format_list(self.patterns, str, default.tokens[default.primitive_pattern_begin], default.tokens[default.value_separator], default.tokens[default.primitive_pattern_end])
 
         return result
 
@@ -53,8 +61,7 @@ class InstancePattern(PrimitivePattern):
         result = "#{}".format(self._identifier)
         if self.parent is not None:
             result += "@{}".format(self.parent.identifier)
-        if len(self.patterns) > 0:
-            result += ", ".join(list(map(repr, self.patterns))).join(['[', ']'])
+        result += util.format_list(self.patterns, repr, '[', ',', ']')
 
         return result
 
@@ -64,16 +71,19 @@ class InstancePattern(PrimitivePattern):
     def append(self, *patterns: ParameterPattern):
         self.patterns += patterns
 
-    def next(self, start: Primitive, nths: Union[int, List[int]]) -> List[Primitive]:
+    def next(self, start: Primitive, nths: Union[int, List[int]], reference_factory: ReferenceFactory) -> List[Primitive]:
         input_parameters = start.as_list()
 
         def next_primitive(nth: int):
             parameters = []
             for index, pattern in enumerate(self.patterns):
-                output_parameters = pattern.next(input_parameters[index], nth)
-                parameters.append(output_parameters)
+                if pattern is None:
+                    output_parameter = input_parameters[index] # Todo fix
+                else:
+                    output_parameter = pattern.next(input_parameters[index], nth)
+                parameters.append(output_parameter)
 
-            return Primitive.from_list(parameters)
+            return Primitive.from_list(reference_factory.new(), parameters[0], parameters[1:])
 
         if isinstance(nths, int):
             return [next_primitive(nths)]
@@ -81,19 +91,16 @@ class InstancePattern(PrimitivePattern):
         return [next_primitive(nth) for nth in nths]
 
 
-class GroupPattern(PrimitivePattern):
-    def __init__(self, pattern: InstancePattern):
-        super(GroupPattern, self).__init__()
-        self.intergroup_pattern: InstancePattern = pattern
-        self.intragroup_patterns: List[Union[GroupPattern, InstancePattern]] = []
+class GroupPattern(InstancePattern):
+    def __init__(self, pattern: PrimitivePattern, identifier: Optional[ReferenceFactory.Reference] = None):
+        super(GroupPattern, self).__init__(identifier)
+        self.intergroup_pattern: PrimitivePattern = pattern
+        self.intragroup_patterns: List[InstancePattern] = []
 
     def __str__(self) -> str:
-        result = "{}{}".format(default.tokens[default.reference], self._identifier)
-        if self.parent is not None:
-            result += "{}{}".format(default.tokens[default.parent], self.parent.identifier)
+        result = "{}{}".format(default.tokens[default.identifier], self._identifier)
         result += default.tokens[default.group_pattern_parent_begin] + str(self.intergroup_pattern) + default.tokens[default.group_pattern_parent_end]
-        if len(self.intragroup_patterns) > 0:
-            result += util.format_list(self.intragroup_patterns, str, default.tokens[default.group_pattern_begin], default.tokens[default.value_separator], default.tokens[default.group_pattern_end])
+        result += util.format_list(self.intragroup_patterns, str, default.tokens[default.group_pattern_children_begin], default.tokens[default.value_separator], default.tokens[default.group_pattern_children_end])
 
         return result
 
@@ -102,18 +109,17 @@ class GroupPattern(PrimitivePattern):
         if self.parent is not None:
             result += "@{}".format(self.parent.identifier)
         result += self.intergroup_pattern
-        if len(self.intragroup_patterns) > 0:
-            result += util.format_list(self.intragroup_patterns, repr, '{', ',', '}')
+        result += util.format_list(self.intragroup_patterns, repr, '{', ',', '}')
 
         return result
 
-    def __getitem__(self, item: int) -> Union[GroupPattern, InstancePattern]:
+    def __getitem__(self, item: int) -> InstancePattern:
         return self.intragroup_patterns[item]
 
     def __iter__(self):
         return self.intragroup_patterns.__iter__()
 
-    @PrimitivePattern.level.setter
+    @InstancePattern.level.setter
     def level(self, value: int):
         if value >= 0:
             self._level = value
@@ -122,12 +128,12 @@ class GroupPattern(PrimitivePattern):
         print("\t" * depth + "#{}".format(self.identifier), end="")
         if self.parent is not None:
             print("@{}".format(self.parent.identifier), end="")
-        print("(" + _format(self.intergroup_pattern) + ") {{ {}".format(self.level))
+        print("(" + _format(self.intergroup_pattern) + ") {")
         for child in self.intragroup_patterns:
             child.print(depth + 1, _format)
         print("\t" * depth + "}")
 
-    def append(self, intragroup_pattern: Union[GroupPattern, InstancePattern]):
+    def append(self, intragroup_pattern: InstancePattern):
         if len(self.intragroup_patterns) == 0:
             self.level = intragroup_pattern.level + 1
         else:
@@ -136,38 +142,41 @@ class GroupPattern(PrimitivePattern):
         self.intragroup_patterns.append(intragroup_pattern)
         intragroup_pattern.parent = self
 
-    def next(self, start: Primitive, nths: Union[int, List[int]]) -> List[Primitive]:
+    def next(self, start: Primitive, nths: Union[int, List[int]], reference_factory: ReferenceFactory) -> List[Primitive]:
         if isinstance(nths, int):
-            return self.intergroup_pattern.next(start, nths)
+            return self.intergroup_pattern.next(start, nths, reference_factory)
 
-        return [self.intergroup_pattern.next(start, nth)[0] for nth in nths]
+        return [self.intergroup_pattern.next(start, nth, reference_factory)[0] for nth in nths]
 
 
 class Pattern:
     @staticmethod
-    def from_list(parameters: Primitive.Parameters) -> Optional[ParameterPattern]:
-        for pattern in [ConstantPattern, LinearPattern, PeriodicPattern]:
-            if parameters[0] == pattern.name():
-                return pattern(parameters[1:])
+    def from_list(name: str, parameters: Primitive.Parameters) -> Optional[ParameterPattern]:
+        for pattern in [ConstantPattern, LinearPattern]:
+            if name == pattern.name():
+                return pattern(*parameters)
+
+        if name == PeriodicPattern.name():
+            return PeriodicPattern(parameters)
 
         return None
 
     @staticmethod
-    def next(start_primitives: List[Primitive], pattern: Union[GroupPattern, InstancePattern], extrapolations: List[int]) -> List[Primitive]:
+    def next(start_primitives: List[Primitive], pattern: InstancePattern, extrapolations: List[int], reference_factory: ReferenceFactory = ReferenceFactory()) -> List[Primitive]:
         assert len(extrapolations) == pattern.level
 
         extrapolation = extrapolations.pop(0)
-        if isinstance(pattern, InstancePattern):
+        if isinstance(pattern, PrimitivePattern):
             result = []
             for start_primitive in start_primitives:
-                result += pattern.next(start_primitive, list(range(extrapolation)))
+                result += pattern.next(start_primitive, list(range(extrapolation)), reference_factory)
 
             return result
 
         elif isinstance(pattern, GroupPattern):
             result = []
             for start_primitive in start_primitives:
-                new_start_primitives = pattern.intergroup_pattern.next(start_primitive, list(range(extrapolation)))
+                new_start_primitives = pattern.intergroup_pattern.next(start_primitive, list(range(extrapolation)), reference_factory)
                 for index, new_start_primitive in enumerate(new_start_primitives):
                     result += Pattern.next([new_start_primitive], pattern[index % len(pattern.intragroup_patterns)], extrapolations.copy())
 
@@ -177,7 +186,10 @@ class Pattern:
             raise Exception()
 
     @staticmethod
-    def search_group_recursive(root: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[Union[GroupPattern, InstancePattern]]:
+    def search_group_recursive(root: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[Union[GroupPattern, PrimitivePattern]]:
+        if root is None:
+            return None
+
         primitive_pattern = Pattern.search_group(root, available_patterns, tolerance)
         group_pattern = primitive_pattern
 
@@ -197,14 +209,17 @@ class Pattern:
         return group_pattern
 
     @staticmethod
-    def search_group(group: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[InstancePattern]:
+    def search_group(group: PrimitiveGroup, available_patterns: [ParameterPattern], tolerance: float) -> Optional[PrimitivePattern]:
+        if group is None:
+            return None
+
         parameters_list = [[] for _ in range(group.max_arity + 1)]
         for primitive in group:
             parameters_list[0].append(primitive.master.name)
             for parameter_index, parameter in enumerate(primitive.master.parameters):
                 parameters_list[parameter_index + 1].append(parameter)
 
-        primitive_pattern = InstancePattern()
+        primitive_pattern = PrimitivePattern()
         for parameters in parameters_list:
             found_pattern = Pattern.search_parameters(parameters, available_patterns, tolerance)
             if found_pattern is None:
@@ -231,64 +246,11 @@ class Pattern:
         return None
 
     @staticmethod
-    def search(primitives: Sequence[Primitive], available_patterns: Sequence, extrapolations: int, tolerance: float):
-        output_parameters = [[] for _ in range(extrapolations)]
-        arity = primitives[0].arity
+    def search(start_primitive: Primitive, root: PrimitiveGroup, available_patterns: List[ParameterPattern], extrapolations: List[int], tolerance: float) -> Tuple[Optional[InstancePattern], Optional[List[Primitive]]]:
+        patterns = Pattern.search_group_recursive(root, available_patterns, tolerance)
+        if patterns is None:
+            return None, None
 
-        if not all(primitive.arity == arity for primitive in primitives):
-            return None, []
+        primitives = Pattern.next([start_primitive], patterns, extrapolations)
 
-        found_patterns = []
-        for index in range(-1, arity):
-            if index == -1:
-                input_parameters = [primitive.name for primitive in primitives]
-            else:
-                input_parameters = [primitive[index] for primitive in primitives]
-
-            parameter_count = len(input_parameters)
-            flags = ParameterFlags(input_parameters)
-
-            for pattern in available_patterns:
-                if parameter_count < pattern.minimum_parameters():
-                    continue
-
-                input_parameters = np.array(input_parameters, flags.dtype)
-                result = pattern.apply(input_parameters, index, flags, tolerance)
-                if result is not None:
-                    found_patterns.append(result)
-                    for extrapolation in range(extrapolations):
-                        output_parameters[extrapolation].append(result.next(input_parameters, extrapolation + 1))
-                    break
-            else:
-                return None, found_patterns
-
-        return output_parameters, found_patterns
-
-if __name__ == '__main__':
-    code1 = """
-    {
-        {p(1). p(2).} 
-        {p(3). p(3).}
-    }{
-        p(4). 
-        {p(5). p(6).}
-    }
-    """
-    code2 = """
-        {p(0, 0). l(1, 0).}
-        {l(0, 1). p(1, 1).}
-    """
-    code3 = """
-        p(0, 0).p(0, 1).
-    """
-
-    code = code2
-    print(code)
-    parse = PrimitiveParser.parse(code)
-    pattern = Pattern.search_group_recursive(parse, [ConstantPattern, LinearPattern, PeriodicPattern], 0.1)
-    pattern.print()
-    print(pattern)
-    print(Pattern.next([parse[0].master], pattern, [4, 4]))
-
-    # Pattern.search_group_recursive(Parser.parse(code2), [ConstantPattern, LinearPattern], 0.1).print()
-    # Pattern.search_group_recursive(Parser.parse(code3), [ConstantPattern, LinearPattern], 0.1).print()
+        return patterns, primitives

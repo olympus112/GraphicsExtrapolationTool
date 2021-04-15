@@ -1,101 +1,229 @@
-from typing import *
-
-from misc import default
 from parsing.lexer import Lexer
-from pattern.pattern import GroupPattern, ParameterPattern, InstancePattern, Pattern
+from pattern.pattern import *
 from pattern.patterns import *
 
-
 class PatternParser:
-    @staticmethod
-    def parse_group_pattern(lexer: Lexer, token: Lexer.Token) -> Optional[GroupPattern]:
-        pass
 
-    @staticmethod
-    def parse_instance_pattern(lexer: Lexer, token: Lexer.Token) -> Optional[InstancePattern]:
-        pass
+    def __init__(self, code: str):
+        self.lexer: Lexer = Lexer(code)
+        self.variables: Dict[str, str] = dict()
 
-    @staticmethod
-    def parse_parameter_pattern(lexer: Lexer, token: Lexer.Token) -> Optional[ParameterPattern]:
-        name = lexer.str(token)
+    def substitute_variable(self, identifier: str) -> str:
+        original_identifier = identifier
+        while identifier in self.variables.keys():
+            identifier = self.variables[identifier]
 
-        if lexer.next().type != default.parameter_pattern_begin:
+            if identifier == original_identifier:
+                break
+
+        return identifier
+
+    def parse_variable_assignment(self, token: Lexer.Token):
+        if token.type != default.variable:
+            return
+
+        name_token = self.lexer.next()
+        if name_token.type != Lexer.Token.IDENTIFIER:
+            return
+
+        assignment = self.lexer.next()
+        if assignment.type != default.assigment:
+            return
+
+        value_token = self.lexer.next()
+        name = self.lexer.str(name_token)
+        value = self.lexer.str(value_token)
+
+        if value_token.type == Lexer.Token.IDENTIFIER:
+            pass
+        elif value_token.type == Lexer.Token.INT:
+            value = int(value)
+        elif value_token.type == Lexer.Token.FLOAT:
+            value = float(value)
+        else:
+            return
+
+        self.variables[name] = value
+
+
+    def parse_identifier(self, token: Lexer.Token, _parse_identifier: bool) -> Tuple[ReferenceFactory.Reference, Lexer.Token]:
+        if _parse_identifier:
+            if token.type == default.identifier:
+                if token.type != default.identifier:
+                    return -1, token
+
+                token = self.lexer.next()
+                if token.type != Lexer.Token.INT:
+                    return -1, token
+
+                identifier = int(self.lexer.str(token))
+                InstancePattern.referenceFactory.reserve(identifier)
+
+                return identifier, self.lexer.next()
+            else:
+                return -1, token
+        else:
+            return -1, token
+
+    def parse_instance_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[InstancePattern]:
+        if token.type == default.variable:
+            self.parse_variable_assignment(token)
+            return self.parse_instance_pattern(self.lexer.next(), _parse_identifier=_parse_identifier)
+
+        identifier, token = self.parse_identifier(token, _parse_identifier)
+        if token.type == default.group_pattern_parent_begin:
+            pattern = self.parse_group_pattern(token, False)
+        elif token.type == default.primitive_pattern_begin:
+            pattern = self.parse_primitive_pattern(token, _parse_identifier=False)
+        else:
+            pattern = None
+
+        if pattern is not None:
+            pattern._identifier = identifier
+
+        return pattern
+
+    def parse_group_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[GroupPattern]:
+        identifier, token = self.parse_identifier(token, _parse_identifier)
+
+        if token.type != default.group_pattern_parent_begin:
+            return None
+
+        parent_begin = self.lexer.next()
+        parent = self.parse_primitive_pattern(parent_begin, _parse_identifier=True)
+        if parent is None:
+            return None
+
+        group_pattern_end = self.lexer.next()
+        if group_pattern_end.type != default.group_pattern_parent_end:
+            return None
+
+        group_children_begin = self.lexer.next()
+        if group_children_begin.type != default.group_pattern_children_begin:
+            return None
+
+        patterns: List[InstancePattern] = []
+
+        token = self.lexer.next()
+        types = { default.primitive_pattern_begin, default.group_pattern_parent_begin, default.identifier, default.group_pattern_children_end }
+        while token.type != Lexer.Token.END:
+            if token.type not in types:
+                return None
+
+            if token.type == default.primitive_pattern_begin or token.type == default.group_pattern_parent_begin or token.type == default.identifier:
+                pattern = self.parse_instance_pattern(token, _parse_identifier=True)
+                patterns.append(pattern)
+
+                types = { default.value_separator, default.group_pattern_children_end }
+            elif token.type == default.value_separator:
+                types = { default.primitive_pattern_begin, default.group_pattern_parent_begin, default.identifier }
+            elif token.type == default.group_pattern_children_end:
+                pattern = GroupPattern(parent, identifier=identifier)
+                for child in patterns:
+                    pattern.append(child)
+
+                return pattern
+            else:
+                return None
+
+            token = self.lexer.next()
+
+    def parse_primitive_pattern(self, token: Lexer.Token, _parse_identifier: bool = True) -> Optional[PrimitivePattern]:
+        identifier, token = self.parse_identifier(token, _parse_identifier=_parse_identifier)
+
+        if token.type != default.primitive_pattern_begin:
+            return None
+
+        patterns: List[ParameterPattern] = []
+
+        token = self.lexer.next()
+        types = { Lexer.Token.IDENTIFIER, default.primitive_pattern_end }
+        while token.type != Lexer.Token.END:
+            if token.type not in types:
+                return None
+
+            if token.type == Lexer.Token.IDENTIFIER:
+                pattern = self.parse_parameter_pattern(token)
+                patterns.append(pattern)
+
+                types = { default.value_separator, default.primitive_pattern_end }
+            elif token.type == default.value_separator:
+                types = { Lexer.Token.IDENTIFIER }
+            elif token.type == default.primitive_pattern_end:
+                return PrimitivePattern(*patterns, identifier=identifier)
+            else:
+                return None
+
+            token = self.lexer.next()
+
+    def parse_parameter_pattern(self, token: Lexer.Token) -> Optional[ParameterPattern]:
+        name = self.lexer.str(token)
+        name = self.substitute_variable(name)
+
+        if self.lexer.next().type != default.parameter_pattern_begin:
             return None
 
         parameters: Primitive.Parameters = []
-        current = lexer.next()
-        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, default.parameter_pattern_end }
 
-        while True:
-            if current.type not in types:
+        token = self.lexer.next()
+        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, default.parameter_pattern_end }
+        while token.type != Lexer.Token.END:
+            if token.type not in types:
                 return None
 
-            if current.type == Lexer.Token.IDENTIFIER:
-                parameters.append(lexer.str(current))
+            if token.type == Lexer.Token.IDENTIFIER:
+                identifier = self.lexer.str(token)
+                identifier = self.substitute_variable(identifier)
+                parameters.append(identifier)
 
                 types = { default.value_separator, default.parameter_pattern_end }
-            elif current.type == Lexer.Token.FLOAT:
-                parameters.append(float(lexer.str(current)))
+            elif token.type == Lexer.Token.FLOAT:
+                parameters.append(float(self.lexer.str(token)))
 
                 types = { default.value_separator, default.parameter_pattern_end }
-            elif current.type == Lexer.Token.INT:
-                parameters.append(int(lexer.str(current)))
+            elif token.type == Lexer.Token.INT:
+                parameters.append(int(self.lexer.str(token)))
 
                 types = { default.value_separator, default.parameter_pattern_end }
-            elif current.type == Lexer.Token.STRING:
-                string = lexer.str(current)
+            elif token.type == Lexer.Token.STRING:
+                string = self.lexer.str(token)
                 if len(string) == 0:
                     return None
 
                 parameters.append(string)
 
                 types = { default.value_separator, default.parameter_pattern_end }
-            elif current.type == default.value_separator:
+            elif token.type == default.value_separator:
                 types = { Lexer.Token.FLOAT, Lexer.Token.INT, Lexer.Token.IDENTIFIER, Lexer.Token.STRING }
-            elif current.type == default.parameter_pattern_end:
+            elif token.type == default.parameter_pattern_end:
                 break
             else:
                 return None
 
-            current = lexer.next()
+            token = self.lexer.next()
 
-        return Pattern.from_list(parameters)
+        return Pattern.from_list(name, parameters)
 
-    @staticmethod
-    def parse(code: str) -> GroupPattern:
-        # lexer = Lexer(code)
-        # pattern = GroupPattern()
-        # stack = []
-        #
-        # parse_next_master = False
-        # current = lexer.next()
-        # while current.type != Lexer.Token.END:
-        #     if current.type == Lexer.Token.OPERATOR and lexer.str(current) == "!":
-        #         parse_next_master = True
-        #     elif current.type == Lexer.Token.IDENTIFIER:
-        #         primitive = PrimitiveParser.parse_primitive(lexer, current)
-        #         if primitive is not None:
-        #             stack[-1].append(primitive)
-        #             if parse_next_master:
-        #                 stack[-1].master = primitive
-        #                 parse_next_master = False
-        #     elif current.type == Lexer.Token.LEFTCURL:
-        #         stack.append(Group())
-        #     elif current.type == Lexer.Token.RIGHTCURL:
-        #         if len(stack) == 1:
-        #             return primitives
-        #
-        #         group = stack.pop()
-        #         stack[-1].append(group)
-        #     else:
-        #         return primitives
-        #
-        #     current = lexer.next()
-        #
-        # return primitives
-        pass
 
-if __name__ == '__main__':
-    code = "Linear[5]"
-    lexer = Lexer(code)
-    result = PatternParser.parse_parameter_pattern(lexer, lexer.next())
+    def add_identifiers(self, pattern: InstancePattern):
+        if pattern.identifier == -1:
+            pattern.identifier = InstancePattern.referenceFactory.new()
+
+        if isinstance(pattern, GroupPattern):
+            if pattern.intergroup_pattern.identifier == -1:
+                pattern.intergroup_pattern.identifier = InstancePattern.referenceFactory.new()
+
+            for child in pattern:
+                self.add_identifiers(child)
+
+
+    def parse(self) -> Optional[InstancePattern]:
+        self.lexer.reset()
+
+        token = self.lexer.next()
+        pattern = self.parse_instance_pattern(token, _parse_identifier=True)
+
+        if pattern is not None:
+            self.add_identifiers(pattern)
+
+        return pattern

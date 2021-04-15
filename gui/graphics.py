@@ -117,9 +117,9 @@ class Bounds:
     def height(self):
         return self.max.y - self.min.y
 
-    def render(self, draw_list, offset, scale, margin=0):
+    def render(self, draw_list, offset, scale, factor=1.0, margin=0):
         draw_list.add_rect(self.min.x * scale + offset.x - margin,
                            self.min.y * -scale + offset.y + margin,
                            self.max.x * scale + offset.x + margin,
                            self.max.y * -scale + offset.y - margin,
-                           imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
+                           imgui.get_color_u32_rgba(0.9 * factor, 0.9 * factor, 0.9 * factor, 1.0))

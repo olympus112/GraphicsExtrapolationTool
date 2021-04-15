@@ -4,7 +4,7 @@ from misc import default
 
 class PrimitiveParser:
     @staticmethod
-    def parse_primitive(lexer: Lexer, token: Lexer.Token) -> Union[Primitive, None]:
+    def parse_primitive(lexer: Lexer, token: Lexer.Token, reference_factory: ReferenceFactory) -> Union[Primitive, None]:
         name = lexer.str(token)
         if lexer.next().type != default.primitive_begin:
             return None
@@ -49,12 +49,12 @@ class PrimitiveParser:
 
             current = lexer.next()
 
-        return Primitive.from_list([name] + parameters)
+        return Primitive.from_list(reference_factory.new(), name, parameters)
 
     @staticmethod
-    def parse(code: str) -> PrimitiveGroup:
+    def parse(code: str, reference_factory=ReferenceFactory()) -> PrimitiveGroup:
         lexer = Lexer(code)
-        primitives = PrimitiveGroup()
+        primitives = PrimitiveGroup(reference_factory.new())
         stack = [primitives]
 
         parse_next_master = False
@@ -63,14 +63,14 @@ class PrimitiveParser:
             if current.type == Lexer.Token.OPERATOR and lexer.str(current) == "!":
                 parse_next_master = True
             elif current.type == Lexer.Token.IDENTIFIER:
-                primitive = PrimitiveParser.parse_primitive(lexer, current)
+                primitive = PrimitiveParser.parse_primitive(lexer, current, reference_factory)
                 if primitive is not None:
                     stack[-1].append(primitive)
                     if parse_next_master:
                         stack[-1].master = primitive
                         parse_next_master = False
             elif current.type == default.primitive_group_begin:
-                stack.append(PrimitiveGroup())
+                stack.append(PrimitiveGroup(reference_factory.new()))
             elif current.type == default.primitive_group_end:
                 if len(stack) == 1:
                     return primitives

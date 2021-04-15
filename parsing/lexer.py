@@ -48,7 +48,7 @@ class Lexer:
             if character is None:
                 return False
 
-            return character in ['+', '-', '*', '/', '<', '>', '~', '&', '|', '!', '?', ':', '=']
+            return character in ['+', '-', '*', '/', '<', '>', '~', '&', '|', '!', '?', ':']
 
     class Token:
         ERROR = 1
@@ -66,12 +66,14 @@ class Lexer:
         OPERATOR = 13
         HASHTAG = 14
         ADRESS = 15
-        SEMICOLON = 16
-        SINGLEQUOTE = 17
-        DOUBLEQUOTE = 18
-        STRING = 19
-        COMMENT = 20
-        END = 21
+        EQUAL = 16
+        DOLLAR = 17
+        SEMICOLON = 18
+        SINGLEQUOTE = 19
+        DOUBLEQUOTE = 20
+        STRING = 21
+        COMMENT = 22
+        END = 23
 
         def __init__(self, type: int, start: int, length: int):
             self.type = type
@@ -84,6 +86,9 @@ class Lexer:
     def __init__(self, string: str):
         self.current = 0
         self.string = string
+
+    def __repr__(self):
+        return self.string[:self.current] + "->" + self.string[self.current:]
 
     def peek(self, offset: int = 0) -> Union[str, None]:
         index = self.current + offset
@@ -210,6 +215,9 @@ class Lexer:
     def str(self, token: Token) -> str:
         return self.string[token.start: token.start + token.length]
 
+    def reset(self):
+        self.current = 0
+
     def next(self) -> Token:
         while Lexer.Util.is_space(self.peek()):
             self.pop()
@@ -250,5 +258,31 @@ class Lexer:
             return self.lex_char(Lexer.Token.HASHTAG)
         elif character == '@':
             return self.lex_char(Lexer.Token.ADRESS)
+        elif character == '=':
+            return self.lex_char(Lexer.Token.EQUAL)
+        elif character == '$':
+            return self.lex_char(Lexer.Token.DOLLAR)
         else:
             return self.lex_char(Lexer.Token.ERROR)
+
+    @staticmethod
+    def extract_constants(code) -> Tuple[List[Token], Dict[str, int]]:
+        lexer = Lexer(code)
+
+        counter: Dict[str, int] = dict()
+        constants: List[Lexer.Token] = []
+
+        token = lexer.next()
+        while token.type != Lexer.Token.END:
+            if token.type == Lexer.Token.IDENTIFIER or token.type == Lexer.Token.INT or token.type == Lexer.Token.FLOAT:
+                value = lexer.str(token)
+
+                constants.append(token)
+                if value in counter.keys():
+                    counter[value] += 1
+                else:
+                    counter[value] = 1
+
+            token = lexer.next()
+
+        return constants, counter

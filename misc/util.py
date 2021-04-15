@@ -20,10 +20,29 @@ class ReferenceFactory:
             return self._free_references.pop()
 
     def release(self, reference: Reference):
+        if reference < 0:
+            return
+
         self._free_references.add(reference)
+
+    def reserve(self, reference: Reference):
+        if reference < 0:
+            return
+
+        if self._reference_counter < reference:
+            for new_reference in range(self._reference_counter + 1, reference):
+                self._free_references.add(new_reference)
+        elif reference in self._free_references:
+            self._free_references.remove(reference)
+        else:
+            print("Reference already used: {}", reference)
 
     def is_free(self, reference: Reference) -> bool:
         return reference > self._reference_counter or reference in self._free_references
+
+    def reset(self):
+        self._reference_counter = -1
+        self._free_references.clear()
 
 def frange(start, stop=None, step=None):
     # if set start=0.0 and step = 1.0 if not specified
@@ -67,7 +86,7 @@ def equal_tolerant(x, y, tolerance):
 def map_range(x, min_in, max_in, min_out, max_out):
     return (x - min_in) * (max_out - min_out) / (max_in - min_in) + min_out
 
-def parse_color(color):
+def parse_color(color, factor):
     r, g, b, a = 1.0, 1.0, 1.0, 1.0
 
     def hsv_to_rgb(h, s, v):
@@ -110,7 +129,7 @@ def parse_color(color):
             (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb((color % 360.0) / 360.0, 1.0, 1.0)]), 1.0
     else:
         print(color, type(color))
-    return imgui.get_color_u32_rgba(r, g, b, a)
+    return imgui.get_color_u32_rgba(r * factor, g * factor, b * factor, a)
 
 def print_methods(obj):
     print([method_name for method_name in dir(obj) if callable(getattr(obj, method_name))])
@@ -119,4 +138,7 @@ def print_attrs(obj):
     print([attr for attr in dir(obj)])
 
 def format_list(_list, _format=str, _begin='[', _separator=',', _end=']', _space=''):
+    if len(_list) == 0:
+        return _begin + _end
+
     return (_separator + ' ').join(list(map(_format, _list))).join([_begin + _space, _space + _end])

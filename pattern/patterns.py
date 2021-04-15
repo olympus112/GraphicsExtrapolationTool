@@ -7,7 +7,7 @@ import numpy as np
 from scipy.optimize import leastsq
 
 from misc import util, default
-from metaclasses import *
+from pattern.metaclasses import *
 from gui.primitives import Primitive
 
 
@@ -80,7 +80,7 @@ class ParameterPattern:
         pass
 
     @staticmethod
-    def confidence(parameters: np.array, true_parameters: np.array, tolerance: float):
+    def confidence(parameters: np.ndarray[Primitive.Parameter], true_parameters: np.array, tolerance: float):
         return np.exp(-np.sqrt(np.average(np.square((parameters - true_parameters) / tolerance))) / (1.0 + tolerance))
 
 
@@ -132,7 +132,7 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
         return ConstantPattern(value, confidence, tolerance)
 
     def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
-        return start
+        return self.value
 
 
 class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
