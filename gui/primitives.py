@@ -41,6 +41,13 @@ class Renderable(ABC):
     def render(self, draw_list, offset: Point, scale: float, factor: float = 1.0):
         pass
 
+    @abstractmethod
+    def dsl(self, _depth: int = 0, _identifier: bool = False) -> str:
+        pass
+
+    def __len__(self) -> int:
+        return 1
+
 
 class Primitive(Renderable):
     Parameter = Union[int, float, str]
@@ -70,6 +77,14 @@ class Primitive(Renderable):
 
     def __len__(self) -> int:
         return self.arity
+
+    def dsl(self, _depth: int = 0, _identifier: bool = False) -> str:
+        return "{}{}{}{}{}".format(
+            "\t" * _depth,
+            "{}{}".format(default.tokens[default.identifier], self.identifier) if _identifier else "",
+            self.name,
+            format_list(self.parameters, str, default.tokens[default.primitive_begin], default.tokens[default.value_separator], default.tokens[default.primitive_end]),
+            default.tokens[default.primitive_separator])
 
     @property
     def master(self) -> Primitive:
@@ -130,6 +145,13 @@ class PrimitiveGroup(Renderable):
 
     def __reversed__(self):
         return self.primitives.__reversed__()
+
+    def dsl(self, _depth: int = 0, _identifier: bool = False) -> str:
+        return "{}{}\n{}\n{}".format(
+            "\t" * _depth,
+            default.tokens[default.primitive_group_begin],
+            "\n".join([primitive.dsl(_depth + 1, _identifier) for primitive in self.primitives]),
+            "\t" * _depth + default.tokens[default.primitive_group_end])
 
     @property
     def master(self) -> Optional[Primitive]:
@@ -209,6 +231,22 @@ class PrimitiveGroup(Renderable):
 
         return None
 
+    def depth(self, item: ReferenceFactory.Reference) -> Optional[int]:
+        if item == self.identifier:
+            return 0
+
+        for primitive in self.primitives:
+            if primitive.identifier == item:
+                return 1
+
+            if isinstance(primitive, PrimitiveGroup):
+                result = primitive.depth(item)
+
+                if result is not None:
+                    return result + 1
+
+        return None
+
     def parent(self, item: ReferenceFactory.Reference) -> Optional[PrimitiveGroup.Parameter]:
         for primitive in self.primitives:
             if primitive.identifier == item:
@@ -282,29 +320,34 @@ class Rect(Primitive):
         self[1] += delta.y
 
     def position(self) -> Point:
-        width, height = self.get_size()
+        # width, height = self.get_size()
+        #
+        # x = self[0] + width / 2
+        # y = self[1] + height / 2
+        # return Point(x, y)
 
-        x = self[0] + width / 2
-        y = self[1] + height / 2
-        return Point(x, y)
+        return Point(self[0], self[1])
 
     def bounds(self) -> Bounds:
         width, height = self.get_size()
 
-        return Bounds(Point(self[0], self[1]), Point(self[0] + width, self[1] + height))
+        # return Bounds(Point(self[0], self[1]), Point(self[0] + width, self[1] + height))
+
+        return Bounds(Point(self[0] - width / 2.0, self[1] - height / 2.0), Point(self[0] + width / 2.0, self[1] + height / 2.0))
 
     def handles(self) -> List[Point]:
         width, height = self.get_size()
 
-        return [Point(self[0] + width, self[1] + height)]
+        # return [Point(self[0] + width, self[1] + height)]
+        return [Point(self[0] + width / 2.0, self[1] + height / 2.0)]
 
     def handle(self, index: int, position: Point):
         if index == 0:
             if self.arity == 3:
                 self[2] = (position - self.position()).length() * math.sqrt(2)
             elif self.arity > 3:
-                self[2] = int(position.x - self[0])
-                self[3] = int(position.y - self[1])
+                self[2] = 2 * int(position.x - self[0])
+                self[3] = 2 * int(position.y - self[1])
 
     def render(self, draw_list: Any, offset: Point, scale: int, factor: float = 1.0):
         if self.arity == 5:
@@ -313,10 +356,15 @@ class Rect(Primitive):
             color = imgui.get_color_u32_rgba(default.r * factor, default.g * factor, default.b * factor, default.a)
 
         width, height = self.get_size()
-        draw_list.add_rect_filled(self[0] * scale + offset.x,
-                                  self[1] * -scale + offset.y,
-                                  (self[0] + width) * scale + offset.x,
-                                  (self[1] + height) * -scale + offset.y,
+        # draw_list.add_rect_filled(self[0] * scale + offset.x,
+        #                           self[1] * -scale + offset.y,
+        #                           (self[0] + width) * scale + offset.x,
+        #                           (self[1] + height) * -scale + offset.y,
+        #                           color)
+        draw_list.add_rect_filled((self[0] - width / 2.0) * scale + offset.x,
+                                  (self[1] - height / 2.0) * -scale + offset.y,
+                                  (self[0] + width / 2.0) * scale + offset.x,
+                                  (self[1] + height / 2.0) * -scale + offset.y,
                                   color)
 
 
@@ -428,6 +476,7 @@ class Vector(Primitive):
 
 
 class Circle(Primitive):
+    radius = 25
 
     def __init__(self, identifier: ReferenceFactory.Reference, arity: int, *parameters: Primitive.Parameter):
         super(Circle, self).__init__(identifier, Circle.static_name(), arity, *parameters)
@@ -438,7 +487,7 @@ class Circle(Primitive):
 
     @staticmethod
     def static_arity() -> List[int]:
-        return [3, 4]
+        return [2, 3, 4]
 
     def move(self, delta: Point):
         self[0] += delta.x
@@ -448,17 +497,29 @@ class Circle(Primitive):
         return Point(self[0], self[1])
 
     def bounds(self) -> Bounds:
-        min_x, min_y = self[0] - self[2], self[1] - self[2]
-        max_x, max_y = self[0] + self[2], self[1] + self[2]
+        if self.arity < 3:
+            radius = 25
+        else:
+            radius = self[2]
+
+        min_x, min_y = self[0] - radius, self[1] - radius
+        max_x, max_y = self[0] + radius, self[1] + radius
 
         return Bounds(Point(min_x, min_y), Point(max_x, max_y))
 
     def handles(self) -> List[Point]:
+        if self.arity < 3:
+            return []
+
         return [Point(self[0] + self[2], self[1])]
 
     def handle(self, index: int, position: Point):
+        if self.arity < 3:
+            return
+
         if index == 0:
-            self[2] = int((position - Point(self[0], self[1]).length()))
+            r = Point(self[0], self[1]).length()
+            self[2] = int((position - Point(r, r)))
 
     def render(self, draw_list: Any, offset: Point, scale: float, factor: float = 1.0):
         if self.arity == 4:
@@ -466,8 +527,13 @@ class Circle(Primitive):
         else:
             color = imgui.get_color_u32_rgba(default.r * factor, default.g * factor, default.b * factor, default.a)
 
+        if self.arity < 3:
+            radius = 25
+        else:
+            radius = self[2]
+
         draw_list.add_circle_filled(self[0] * scale + offset.x,
                                     self[1] * -scale + offset.y,
-                                    self[2] * scale,
+                                    radius * scale,
                                     color,
                                     30)

@@ -7,6 +7,7 @@ import numpy as np
 from scipy.optimize import leastsq
 
 from misc import util, default
+from misc.util import Tolerance
 from pattern.metaclasses import *
 from gui.primitives import Primitive
 
@@ -72,23 +73,37 @@ class ParameterPattern:
 
     @staticmethod
     @abstractmethod
-    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
+    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
         pass
 
     @abstractmethod
-    def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
+    def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
+        pass
+
+    @abstractmethod
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         pass
 
     @staticmethod
-    def confidence(parameters: np.ndarray[Primitive.Parameter], true_parameters: np.array, tolerance: float):
-        return np.exp(-np.sqrt(np.average(np.square((parameters - true_parameters) / tolerance))) / (1.0 + tolerance))
+    def confidence(parameters: np.ndarray[Primitive.Parameter], true_parameters: np.array, tolerance: Tolerance):
+        return np.exp(-np.sqrt(np.average(np.square((parameters - true_parameters) / tolerance.relative))) / (1.0 + tolerance.relative))
+
+    @staticmethod
+    def rounded(parameter: Union[Primitive.Parameter, Sequence[Primitive.Parameter]], value: Optional[int] = None):
+        if value is not None:
+            if isinstance(parameter, (int, float)):
+                return round(parameter, value)
+            elif isinstance(parameter, list):
+                return [ParameterPattern.rounded(param, value) for param in parameter]
+
+        return parameter
 
 
 class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
-    def __init__(self, value: Primitive.Parameter, confidence: float = default.confidence, tolerance: float = default.tolerance):
+    def __init__(self, value: Primitive.Parameter, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
         self.value: Primitive.Parameter = value
         self.confidence: float = confidence
-        self.tolerance: float = tolerance
+        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
         return "{}{}{}{}".format(
@@ -104,47 +119,63 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
             self.confidence,
             self.tolerance)
 
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
+        return "{}{}{}{}{}{}".format(
+            self.name(),
+            default.tokens[default.parameter_pattern_begin],
+            self.value,
+            "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
+            "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
+            default.tokens[default.parameter_pattern_end])
+
     @staticmethod
     def name() -> str:
         return "Constant"
 
     @staticmethod
     def minimum_parameters() -> int:
-        return 2
+        return 1
 
     @staticmethod
-    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
-        value = parameters[0]
-        for i in range(1, len(parameters)):
-            if flags.has_str():
-                if not parameters[i] == value:
-                    return None
-            else:
-                if not util.equal_tolerant(parameters[i], value, tolerance):
-                    return None
+    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
+        if flags.has_str():
+            value = parameters[0]
+            result = np.all(parameters == value)
+        else:
+            value = np.mean(parameters)
+            result = np.allclose(parameters, value, rtol=tolerance.relative, atol=tolerance.absolute)
+
+        if not result:
+            return None
 
         if flags.has_str():
             confidence = 1.0
         else:
-            true_parameters = np.full(len(parameters), value, dtype=flags.dtype)
+            true_parameters = np.full(parameters.shape, value, dtype=flags.dtype)
             confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
 
-        return ConstantPattern(value, confidence, tolerance)
+        return ConstantPattern(ParameterPattern.rounded(value, _round), confidence, tolerance)
 
-    def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
-        return self.value
+    def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
+        if start is None:
+            return self.value
+        else:
+            return start
 
 
 class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
-    def __init__(self, delta: Primitive.Parameter, confidence: float = default.confidence, tolerance: float = default.tolerance):
+    def __init__(self, start: Primitive.Parameter, delta: Primitive.Parameter, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        self.start: Primitive.Parameter = start
         self.delta: Primitive.Parameter = delta
         self.confidence: float = confidence
-        self.tolerance: float = tolerance
+        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
-        return "{}{}{}{}".format(
+        return "{}{}{}{}{}{}".format(
             self.name(),
             default.tokens[default.parameter_pattern_begin],
+            self.start,
+            default.tokens[default.value_separator],
             self.delta,
             default.tokens[default.parameter_pattern_end])
 
@@ -155,6 +186,16 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
             self.confidence,
             self.tolerance)
 
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
+        return "{}{}{}{}{}{}{}".format(
+            self.name(),
+            default.tokens[default.parameter_pattern_begin],
+            self.start,
+            "{} {}".format(default.tokens[default.value_separator], self.delta),
+            "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
+            "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
+            default.tokens[default.parameter_pattern_end])
+
     @staticmethod
     def name() -> str:
         return "Linear"
@@ -164,31 +205,35 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
         return 2
 
     @staticmethod
-    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
+    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
         if flags.has_str():
             return None
 
         start = parameters[0]
-        delta = parameters[1] - parameters[0]
+        difference = np.ediff1d(parameters)
+        value = np.mean(difference)
+        result = np.allclose(difference, value, atol=tolerance.absolute, rtol=tolerance.relative)
 
-        for i in range(2, len(parameters)):
-            if not util.equal_tolerant(parameters[i - 1] + delta, parameters[i], abs(tolerance * delta)):
-                return None
+        if not result:
+            return None
 
-        true_parameters = np.array([start + i * delta for i in range(len(parameters))])
+        true_parameters = np.array([start + i * value for i in range(len(parameters))])
         confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
 
-        return LinearPattern(delta, confidence, tolerance)
+        return LinearPattern(ParameterPattern.rounded(start, _round), ParameterPattern.rounded(value, _round), confidence, tolerance)
 
     def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
-        return start + nth * self.delta
+        if start is None:
+            return self.start + nth * self.delta
+        else:
+            return start + nth * self.delta
 
 
 class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
-    def __init__(self, pattern: Primitive.Parameters, confidence: float = default.confidence, tolerance: float = default.tolerance):
+    def __init__(self, pattern: Primitive.Parameters, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
         self.pattern: Primitive.Parameters = pattern
         self.confidence: float = confidence
-        self.tolerance: float = tolerance
+        self.tolerance: Tolerance = tolerance
 
     def __str__(self):
         return "{}{}".format(
@@ -202,6 +247,15 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
             self.confidence,
             self.tolerance)
 
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
+        return "{}{}{}{}{}{}".format(
+            self.name(),
+            default.tokens[default.parameter_pattern_begin],
+            util.format_list(self.pattern, str, '', default.tokens[default.value_separator], ''),
+            "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
+            "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
+            default.tokens[default.parameter_pattern_end])
+
     @staticmethod
     def name() -> str:
         return "Period"
@@ -211,7 +265,7 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
         return 2
 
     @staticmethod
-    def apply(parameters: np.array, flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
+    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
         def equal(x, y):
             if flags.has_str():
                 return x == y
@@ -236,8 +290,7 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
                     match_index += 1
                 else:
                     pattern += pattern * (multiplicity - 1)
-                    pattern += pattern[:match_index]
-                    pattern.append(parameter)
+                    pattern += pattern[:match_index] + [parameter]
                     multiplicity = 0
                     match_index = 0
 
@@ -249,18 +302,24 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
             true_parameters = pattern * multiplicity + pattern[:len(parameters) % len(pattern)]
             confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
 
-        return PeriodicPattern(pattern, confidence, tolerance)
+        return PeriodicPattern(ParameterPattern.rounded(pattern, _round), confidence, tolerance)
 
-    def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
-        return self.pattern[nth % len(self.pattern)]
+    def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
+        if any(isinstance(i, str) for i in [start, *self.pattern]):
+            return self.pattern[nth % len(self.pattern)]
+
+        if start is None:
+            start = 0
+
+        return start + self.pattern[nth % len(self.pattern)] - self.pattern[0]
 
 
 class Operator:
 
     class Plus(object, metaclass=MOperator.Plus):
         @staticmethod
-        def generate(parameters: Primitive.Parameters) -> Primitive.Parameters:
-            return [parameters[i + 1] + parameters[i] for i in range(len(parameters) - 1)]
+        def generate(parameters: np.ndarray[Primitive.Parameter]) -> np.ndarray[Primitive.Parameter]:
+            return parameters[1:] + parameters[:-1]
 
         @staticmethod
         def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> Primitive.Parameter:
@@ -268,17 +327,17 @@ class Operator:
 
     class Min(object, metaclass=MOperator.Min):
         @staticmethod
-        def generate(parameters: Primitive.Parameters) -> Primitive.Parameters:
-            return [parameters[i + 1] - parameters[i] for i in range(len(parameters) - 1)]
+        def generate(parameters: np.ndarray[Primitive.Parameter]) -> np.ndarray[Primitive.Parameter]:
+            return np.ediff1d(parameters)
 
         @staticmethod
-        def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> Primitive.Parameter:
+        def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> np.ndarray[Primitive.Parameter]:
             return delta + parameter
 
     class Mul(object, metaclass=MOperator.Mul):
         @staticmethod
-        def generate(parameters: Primitive.Parameters) -> Primitive.Parameters:
-            return [parameters[i + 1] * parameters[i] for i in range(len(parameters) - 1)]
+        def generate(parameters: np.ndarray[Primitive.Parameter]) -> np.ndarray[Primitive.Parameter]:
+            return parameters[1:] * parameters[:-1]
 
         @staticmethod
         def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> Primitive.Parameter:
@@ -286,11 +345,11 @@ class Operator:
 
     class Div(object, metaclass=MOperator.Div):
         @staticmethod
-        def generate(parameters: Primitive.Parameters) -> Primitive.Parameters:
-            return [parameters[i + 1] / parameters[i] for i in range(len(parameters) - 1)]
+        def generate(parameters: np.ndarray[Primitive.Parameter]) -> np.ndarray[Primitive.Parameter]:
+            return parameters[1:] / parameters[:-1]
 
         @staticmethod
-        def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> Primitive.Parameter:
+        def next(delta: Primitive.Parameter, parameter: Primitive.Parameter) -> np.ndarray[Primitive.Parameter]:
             return delta * parameter
 
     Operators = List[Union[Plus, Min, Mul, Div]]
@@ -300,17 +359,17 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
     zero_safe_operations = [Operator.Min, Operator.Plus]
     zero_unsafe_operations = [Operator.Min, Operator.Plus, Operator.Div, Operator.Mul]
 
-    def __init__(self, operators: Operator.Operators, values: Primitive.Parameters, confidence: float = default.confidence, tolerance: float = default.tolerance):
+    def __init__(self, operators: Operator.Operators, values: Primitive.Parameters, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
         self.operators: Operator.Operators = operators
         self.values: Primitive.Parameters = values
         self.confidence: float = confidence
-        self.tolerance: float = tolerance
+        self.tolerance: Tolerance = tolerance
+        self._cache: List[float] = []
 
     def __str__(self) -> str:
         return "{}{}".format(
             self.name(),
             util.format_list(self.operators + self.values, str, default.tokens[default.parameter_pattern_begin], default.tokens[default.value_separator], default.tokens[default.parameter_pattern_end]))
-
 
     def __repr__(self) -> str:
         return "{}[type=BFS, operators={}, values={}, confidence={}, tolerance={}]".format(
@@ -319,6 +378,15 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             self.values,
             self.confidence,
             self.tolerance)
+
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
+        return "{}{}{}{}{}{}".format(
+            self.name(),
+            default.tokens[default.parameter_pattern_begin],
+            util.format_list(self.operators + self.values, str, '', default.tokens[default.value_separator], ''),
+            "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
+            "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
+            default.tokens[default.parameter_pattern_end])
 
     @staticmethod
     def name() -> str:
@@ -329,9 +397,29 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
         return 3
 
     @staticmethod
-    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
+    def apply(original_parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
         if flags.has_str():
             return None
+
+        def validate(pattern: BFSOperatorPattern) -> bool:
+            parameter_reference = original_parameters
+            parameter_min = parameter_reference.min()
+            parameter_max = parameter_reference.max()
+            n_start = len(parameter_reference)
+            n_delta = 5
+            tol = 1.0
+            for extrapolation in range(n_start, n_start + n_delta):
+                parameter_range = parameter_max - parameter_min
+
+                parameter_next = pattern.next(parameter_reference[0], extrapolation)
+                if parameter_next - parameter_reference[-1] > tol * parameter_range:
+                    return False
+
+                parameter_min = min(parameter_min, parameter_next)
+                parameter_max = max(parameter_max, parameter_next)
+                parameter_reference = np.append(parameter_reference, parameter_next)
+
+            return True
 
         def expand_history(history, new_operator, new_parameter) -> Tuple[Operator.Operators, Primitive.Parameters]:
             if history is None:
@@ -350,7 +438,7 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             if init:
                 init = False
                 history = None
-                new_parameters = parameters
+                new_parameters = original_parameters
             else:
                 operation, parameters, history = queue.pop(0)
                 new_parameters = operation.generate(parameters)
@@ -358,11 +446,15 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             if len(new_parameters) < 2:
                 continue
 
-            if util.all_same(new_parameters, new_parameters[0] * tolerance):
-                # TODO confidence
-                confidence = 1.0
+            if util.all_same(new_parameters, tolerance):
+                confidence = ParameterPattern.confidence(new_parameters, np.full(new_parameters.shape, new_parameters[0], flags.dtype), tolerance)
                 operators, values = expand_history(history, None, new_parameters[0])
-                return BFSOperatorPattern(operators, values, confidence, tolerance)
+
+                pattern = BFSOperatorPattern(operators, ParameterPattern.rounded(values, _round), confidence, tolerance)
+                if not validate(pattern):
+                    return None
+
+                return pattern
 
             if len(new_parameters) == 2:
                 continue
@@ -377,28 +469,30 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
 
         return None
 
-    def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
-        values = self.values.copy()
-        # for _ in range(nth):
-        #     for i in range(len(self.operators) - 1, -1, -1):
-        #         values[i] = self.operators[i].next(values[i + 1], values[i])
+    def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
+        # if nth < len(self._cache):
+        #     return self._cache[nth]
 
-        for _ in range(nth):
+        values = self.values.copy()
+
+        for j in range(nth):
             for i in range(len(self.operators)):
                 values[i] = self.operators[i].next(values[i + 1], values[i])
 
-        #TODO update
+            # if j >= len(self._cache):
+            #     self._cache.append(values[0])
+
         return values[0]
 
 
 class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
-    def __init__(self, amplitude: float, frequency: float, phase: float, mean: float, confidence: float = default.confidence, tolerance: float = default.tolerance):
+    def __init__(self, amplitude: float, frequency: float, phase: float, mean: float, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
         self.amplitude: float = amplitude
         self.frequency: float = frequency
         self.phase: float = phase
         self.mean: float = mean
         self.confidence: float = confidence
-        self.tolerance: float = tolerance
+        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
         return "{}{}".format(
@@ -415,6 +509,18 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
             self.confidence,
             self.tolerance)
 
+    def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
+        return "{}{}{}{}{}{}{}{}{}".format(
+            self.name(),
+            default.tokens[default.parameter_pattern_begin],
+            self.amplitude,
+            self.frequency,
+            self.phase,
+            self.mean,
+            "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
+            "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
+            default.tokens[default.parameter_pattern_end])
+
     @staticmethod
     def name() -> str:
         return "Sinus"
@@ -424,7 +530,7 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
         return 4
 
     @staticmethod
-    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: float = default.tolerance) -> Optional[ParameterPattern]:
+    def apply(parameters: np.ndarray[Primitive.Parameter], flags: ParameterFlags, tolerance: Tolerance = default.tolerance, _round: Optional[int] = None) -> Optional[ParameterPattern]:
         if flags.has_str():
             return None
 
@@ -437,9 +543,9 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
         est_amp, est_freq, est_phase, est_mean = leastsq(lambda x: x[0] * np.sin(x[1] * t + x[2]) + x[3] - parameters, np.array([guess_amp, guess_freq, guess_phase, guess_mean]))[0]
         confidence = 1.0
 
-        return SinusoidalPattern(est_amp, est_freq, est_phase, est_mean, confidence, tolerance)
+        return SinusoidalPattern(ParameterPattern.rounded(est_amp, _round), ParameterPattern.rounded(est_freq, _round), ParameterPattern.rounded(est_phase, _round), ParameterPattern.rounded(est_mean, _round), confidence, tolerance)
 
-    def next(self, start: Primitive.Parameter, nth: int) -> Primitive.Parameter:
+    def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
         return self.amplitude * math.sin(self.frequency * nth + self.phase) + self.mean
 
 

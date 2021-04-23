@@ -1,5 +1,6 @@
 from unittest import TestCase
 
+from misc import util
 from parsing.lexer import Lexer
 from parsing.pattern_parser import PatternParser
 
@@ -11,11 +12,11 @@ class PatternParserTests(TestCase):
             pattern = parser.parse_parameter_pattern(parser.lexer.next())
             print(pattern)
 
-        code1 = "Linear[5]"
-        code2 = "Constant[5]"
-        code3 = "Period[5, 4, 7]"
-        code4 = "Period[p, 4, p_7]"
-        code5 = "None[]"
+        code1 = "Linear(5)"
+        code2 = "Constant(5)"
+        code3 = "Period(5, 4, 7)"
+        code4 = "Period(p, 4, p_7)"
+        code5 = "None()"
 
         test(code1)
         test(code2)
@@ -26,11 +27,12 @@ class PatternParserTests(TestCase):
     def test_primitive_pattern(self):
         def test(code):
             parser = PatternParser(code)
-            pattern = parser.parse_primitive_pattern(parser.lexer.next())
+            pattern = parser.parse_primitive_pattern(parser.lexer.next(), util.ReferenceFactory())
             print(pattern)
+            print(pattern.dsl())
 
-        code1 = "[Linear[5], Constant[1]]"
-        code2 = "[Linear[5], Constant[1], Period[1]]"
+        code1 = "@1,2[1:Linear(5), 2:Constant(1)]"
+        code2 = "[1:Linear(5), 2:Constant(1), 3:Period(1)]"
         code3 = "[]"
 
         test(code1)
@@ -83,7 +85,7 @@ class PatternParserTests(TestCase):
         def test(code):
             parser = PatternParser(code)
             pattern = parser.parse()
-            pattern.print(_format=repr)
+            print(pattern.dsl(_identifier=True))
 
         code1 = "([]){([]){[],([]){[]}},[]}"
 

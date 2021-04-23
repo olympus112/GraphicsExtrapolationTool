@@ -30,6 +30,8 @@ class Screen:
         self.itext = ""
         self.otext = ""
         self.opatterns = ""
+        self.named_primitives_text = ""
+        self.named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors] = dict()
         self.console = []
 
         self.show_file_loader = False
@@ -44,13 +46,15 @@ class Screen:
         self.query_results = []
 
         self.extrapolations = []
-        self.tolerance = 0.1
+        self.round = 1
+        self.tolerance = Tolerance(0, 0.1)
         self.found_patterns: Optional[InstancePattern] = None
-        self.available_patterns = [ConstantPattern, LinearPattern, BFSOperatorPattern, PeriodicPattern, SinusoidalPattern]
+        self.available_patterns: List[ParameterPattern] = [ConstantPattern, LinearPattern, BFSOperatorPattern, PeriodicPattern, SinusoidalPattern]
         self.selected_patterns = [True for _ in self.available_patterns]
-        self.render_order = False
+        self.render_order = 0
         self.render_identifiers = False
         self.extract_constants = True
+        self.use_sizes = True
 
         self.camera_offset = Point(64 * 4.5, 64 * 2.65)
         self.scale_index = 0
@@ -248,37 +252,54 @@ class Screen:
     def render_settings(self):
         imgui.begin("Settings")
 
-        imgui.text("mx: {}, my: {}".format(imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y))
-        imgui.text("offset x: {}, offset y: {}".format(self.camera_offset.x, self.camera_offset.y))
-        imgui.text("scale: {}".format(self.icanvas.scale))
+        util.imgui_properties_start()
+        util.imgui_title("Info")
+        util.imgui_property("Mouse x", imgui.text, str(imgui.get_io().mouse_pos.x))
+        util.imgui_property("Mouse y", imgui.text, str(imgui.get_io().mouse_pos.y))
+        util.imgui_property("Offset x", imgui.text, str(self.camera_offset.x))
+        util.imgui_property("Offset y", imgui.text, str(self.camera_offset.y))
+        util.imgui_property("Scale", imgui.text, str(self.icanvas.scale))
+        util.imgui_property("Intersected", imgui.text, str(self.icanvas.intersected_renderable))
+        util.imgui_property("Selected", imgui.text, str(self.icanvas.selected_renderables.renderables))
+        util.imgui_property("Group", imgui.text, str(self.icanvas.selected_group))
+        savings = "N/A" if len(self.opatterns) == 0 or len(self.otext) == 0 else round((1.0 - float(len(self.opatterns)) / float(len(self.otext))) * 100.0, 2)
+        util.imgui_property("Space saving", imgui.text, str(savings))
 
         any_changed = False
+        util.imgui_title("Extrapolations", True)
         if self.found_patterns is not None:
             for i in range(self.found_patterns.level):
-                changed, self.extrapolations[i] = imgui.drag_int("Extrapolation {}".format(i + 1), self.extrapolations[i], 0.2, 1, 1000)
+                changed, self.extrapolations[i] = util.imgui_property("Depth {}".format(i + 1), imgui.drag_int, "##Extrapolation{}".format(i + 1), self.extrapolations[i], 0.2, 1, 1000)
                 any_changed |= changed
-        _, self.tolerance = imgui.drag_float("Tolerance", self.tolerance)
+        else:
+            util.imgui_property("N/A", imgui.text_unformatted, "N/A")
 
+        util.imgui_title("Tolerance", True)
+        changed, self.tolerance.absolute = util.imgui_property("Absolute", imgui.drag_float, "##absolute", self.tolerance.absolute, 0.1, 0, 20.0)
+        any_changed |= changed
+        changed, self.tolerance.relative = util.imgui_property("Relative", imgui.drag_float, "##relative", self.tolerance.relative, 0.01, 0, 1.0)
+        any_changed |= changed
+
+        util.imgui_title("Misc", True)
+        changed, self.round = util.imgui_property("Rounding", imgui.drag_int, "##Round", self.round, 0.1, 0, 10)
+        changed, self.extract_constants = util.imgui_property("Extract constants", imgui.checkbox, "##constants", self.extract_constants)
+        changed, self.use_sizes = util.imgui_property("Use sizes", imgui.checkbox, "##sizes", self.use_sizes)
+        any_changed |= changed
+
+        util.imgui_title("Patterns", True)
         for index, pattern in enumerate(self.available_patterns):
-            changed, self.selected_patterns[index] = imgui.checkbox(str(pattern), self.selected_patterns[index])
+            changed, self.selected_patterns[index] = util.imgui_property(str(pattern), imgui.checkbox, "##{}".format(str(pattern)), self.selected_patterns[index])
             any_changed |= changed
 
-        if len(self.opatterns) == 0 or len(self.otext) == 0:
-            savings = "/"
-        else:
-            savings = round((1.0 - float(len(self.opatterns)) / float(len(self.otext))) * 100.0, 2)
-        imgui.text("Space saving: {}%".format(savings))
+        util.imgui_properties_end()
 
         if any_changed:
-            self.icanvas_to_all()
-
-        changed, self.extract_constants = imgui.checkbox("Extract constants", self.extract_constants)
-        if changed:
             self.icanvas_to_all()
 
         for entry in self.console:
             imgui.text_colored('{} (x{})'.format(entry[0], entry[1]), *entry[2])
 
+        imgui.text(str(self.named_primitives))
         imgui.end()
 
     def render_input(self):
@@ -311,6 +332,10 @@ class Screen:
         self.render_opatterns()
         imgui.end()
 
+        imgui.begin("Bias##Input")
+        self.render_named_primitives()
+        imgui.end()
+
     def render_itext(self):
         imgui.push_font(self.consolas)
         changed, value = imgui.input_text_multiline("##itext", self.itext, len(self.itext) + 1000, -1, -1)
@@ -333,6 +358,14 @@ class Screen:
         if changed:
             self.opatterns = value
             self.opatterns_to_all()
+        imgui.pop_font()
+
+    def render_named_primitives(self):
+        imgui.push_font(self.consolas)
+        changed, value = imgui.input_text_multiline("##namedprimitives", self.named_primitives_text, len(self.named_primitives_text) + 1000, -1, -1)
+        if changed:
+            self.named_primitives_text = value
+            self.itext_to_all()
         imgui.pop_font()
 
     def render_ocanvas(self):
@@ -482,7 +515,7 @@ class Screen:
             if imgui.is_key_pressed(glfw.KEY_P):
                 self.show_ilp = not self.show_ilp
             if imgui.is_key_pressed(glfw.KEY_O):
-                self.render_order = not self.render_order
+                self.render_order = (self.render_order + 1) % 3
             if imgui.is_key_pressed(glfw.KEY_I):
                 self.render_identifiers = not self.render_identifiers
             if imgui.is_key_pressed(glfw.KEY_L):
@@ -498,20 +531,22 @@ class Screen:
             if imgui.is_key_pressed(glfw.KEY_D) and imgui.get_io().key_ctrl:
                 self.icanvas.duplicate_selection()
                 self.icanvas_to_all()
+            if imgui.is_key_pressed(glfw.KEY_F):
+                self.icanvas.selection_to_front()
+                self.icanvas_to_all()
 
 
         # if not imgui.get_io().want_capture_mouse:
         if imgui.get_io().mouse_wheel != 0 and imgui.get_io().want_capture_mouse:
-            if imgui.get_io().key_shift:
-                self.tolerance = util.clamp(self.tolerance + 0.1 * imgui.get_io().mouse_wheel, 0.0, 5.0)
-            elif imgui.get_io().key_ctrl:
+            if imgui.get_io().key_ctrl:
                 self.scale_index += 0.1 * imgui.get_io().mouse_wheel
                 new_scale = self.scale_index + 1 if self.scale_index > 0 else math.exp(self.scale_index)
                 self.icanvas.scale = new_scale
                 self.ocanvas.scale = new_scale
             else:
-                for i in range(len(self.extrapolations)):
-                    self.extrapolations[i] = int(max(1, self.extrapolations[i] + imgui.get_io().mouse_wheel))
+                depth = self.icanvas.primitives.depth(self.icanvas.selected_group)
+                if depth is not None:
+                    self.extrapolations[depth] = int(max(0, self.extrapolations[depth] + imgui.get_io().mouse_wheel))
 
             self.found_patterns_to_ocanvas()
 
@@ -521,28 +556,37 @@ class Screen:
 
     def itext_to_icanvas(self):
         self.icanvas.reset()
-        self.icanvas.primitives = PrimitiveParser.parse(self.itext, reference_factory=self.icanvas.reference_factory)
-        self.icanvas.selected_group = self.icanvas.primitives.identifier
+        parser = PrimitiveParser(self.named_primitives_text + self.itext)
+        try:
+            self.icanvas.primitives, self.named_primitives = parser.parse(reference_factory=self.icanvas.reference_factory)
+            self.icanvas.selected_group = self.icanvas.primitives.identifier
+        except Exception as error:
+            self.handle_error(error)
 
     def otext_to_ocanvas(self):
         self.ocanvas.reset()
-        self.ocanvas.primitives = PrimitiveParser.parse(self.otext, reference_factory=self.ocanvas.reference_factory)
-        self.ocanvas.selected_group = self.ocanvas.primitives.identifier
+        parser = PrimitiveParser(self.otext)
+        try:
+            self.ocanvas.primitives, _ = parser.parse(reference_factory=self.ocanvas.reference_factory)
+            self.ocanvas.selected_group = self.ocanvas.primitives.identifier
+        except Exception as error:
+            self.handle_error(error)
+
 
     def icanvas_to_itext(self):
-        self.itext = str(self.icanvas)
+        self.itext = "\n".join([primitive.dsl() for primitive in self.icanvas.primitives])
 
     def ocanvas_to_otext(self):
-        self.otext = str(self.ocanvas)
+        self.otext = "\n".join([primitive.dsl() for primitive in self.ocanvas.primitives])
 
     def icanvas_to_found_patterns(self):
-        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.available_patterns, self.tolerance, ReferenceFactory())
+        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.named_primitives, [p for i, p in enumerate(self.available_patterns) if self.selected_patterns[i]], self.tolerance, ReferenceFactory(), _round=None if self.round == 0 else self.round)
         if self.found_patterns is not None and len(self.extrapolations) < self.found_patterns.level:
             self.extrapolations.extend([1] * (self.found_patterns.level - len(self.extrapolations)))
 
     def found_patterns_to_opatterns(self):
         if self.found_patterns is not None:
-            self.opatterns = str(self.found_patterns)
+            self.opatterns = self.found_patterns.dsl()
         else:
             self.opatterns = ""
 
@@ -567,7 +611,7 @@ class Screen:
             return
 
         try:
-            primitives = Pattern.next([master], self.found_patterns, self.extrapolations[:self.found_patterns.level], self.ocanvas.reference_factory)
+            primitives = Pattern.next([master], self.found_patterns, self.named_primitives, self.extrapolations[:self.found_patterns.level], self.ocanvas.reference_factory, self.use_sizes)
 
             for primitive in primitives:
                 if primitive is not None:
@@ -577,8 +621,33 @@ class Screen:
 
         self.ocanvas_to_otext()
 
+    def parse_named_primitives(self):
+        parser = PrimitiveParser(self.named_primitives_text)
+        try:
+            self.named_primitives = parser.parse_named_primitives()
+        except Exception as error:
+            self.handle_error(error)
+
+    def expand_named_primitives(self):
+        def get_unique_primitives(group: PrimitiveGroup) -> Set[Tuple[str, int]]:
+            unique_primitives = set()
+            for primitive in group:
+                if isinstance(primitive, Primitive):
+                    unique_primitives.add((primitive.name, primitive.arity))
+                elif isinstance(primitive, PrimitiveGroup):
+                    unique_primitives = unique_primitives | get_unique_primitives(primitive)
+
+            return unique_primitives
+
+        unique_primitives = get_unique_primitives(self.icanvas.primitives)
+        for unique_primitive in unique_primitives:
+            if unique_primitive not in self.named_primitives:
+                self.named_primitives[unique_primitive] = list(range(unique_primitive[1]))
+
     def icanvas_to_all(self):
         self.icanvas_to_itext()
+        self.parse_named_primitives()
+        self.expand_named_primitives()
         self.icanvas_to_found_patterns()
         self.found_patterns_to_opatterns()
         self.opatterns_extract_constants()
@@ -588,6 +657,7 @@ class Screen:
         self.itext_to_icanvas()
         self.icanvas_to_found_patterns()
         self.found_patterns_to_opatterns()
+        self.opatterns_extract_constants()
         self.found_patterns_to_ocanvas()
 
     def opatterns_to_all(self):

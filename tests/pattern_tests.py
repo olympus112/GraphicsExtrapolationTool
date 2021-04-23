@@ -21,16 +21,17 @@ class PatternTests(TestCase):
             {l(0, 1). p(1, 1).}
         """
         code3 = """
-            p(0, 0).p(0, 1).
+            p(0, 0).p(0, 1, 2).
         """
 
-        code = code2
+        code = code3
         print(code)
-        parse = PrimitiveParser.parse(code)
-        pattern = Pattern.search_group_recursive(parse, [ConstantPattern, LinearPattern, PeriodicPattern], 0.1)
-        pattern.print()
-        print(pattern)
-        print(Pattern.next([parse[0].master], pattern, [4, 4]))
+        rf = util.ReferenceFactory()
+        parse = PrimitiveParser.parse(code, rf)
+        pattern = Pattern.search_group_recursive(parse, [ConstantPattern, LinearPattern, PeriodicPattern], util.Tolerance(0.0, 0.1), rf)
+        # pattern = Pattern.search_group(parse, [ConstantPattern, LinearPattern, PeriodicPattern], util.Tolerance(0.0, 0.1), rf)
+
+        print(pattern.dsl())
 
         # Pattern.search_group_recursive(Parser.parse(code2), [ConstantPattern, LinearPattern], 0.1).print()
         # Pattern.search_group_recursive(Parser.parse(code3), [ConstantPattern, LinearPattern], 0.1).print()
@@ -41,3 +42,8 @@ class PatternTests(TestCase):
         result = BFSOperatorPattern.apply(numbers, ParameterFlags(numbers), tolerance=0)
         print(result)
         print(result.next(3, 2))
+
+    def test_period(self):
+        numbers = np.array([2, 3, 4, 2])
+        result = PeriodicPattern.apply(numbers, ParameterFlags(numbers))
+        print(result)

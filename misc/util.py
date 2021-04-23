@@ -80,8 +80,16 @@ def clamp(value, min, max):
         return max
     return value
 
-def equal_tolerant(x, y, tolerance):
-    return -tolerance <= x - y <= tolerance
+class Tolerance:
+    def __init__(self, absolute: float, relative: float):
+        self.absolute = absolute
+        self.relative = relative
+
+def equal_tolerant(x: float, y: float, tolerance: Tolerance):
+    if tolerance is None:
+        return x == y
+
+    return np.isclose(x, y, tolerance.relative, tolerance.absolute)
 
 def map_range(x, min_in, max_in, min_out, max_out):
     return (x - min_in) * (max_out - min_out) / (max_in - min_in) + min_out
@@ -137,8 +145,34 @@ def print_methods(obj):
 def print_attrs(obj):
     print([attr for attr in dir(obj)])
 
-def format_list(_list, _format=str, _begin='[', _separator=',', _end=']', _space=''):
+def format_list(_list, _format=str, _begin='[', _separator=',', _end=']', _outer_space='', _inner_space=' '):
     if len(_list) == 0:
         return _begin + _end
 
-    return (_separator + ' ').join(list(map(_format, _list))).join([_begin + _space, _space + _end])
+    return (_separator + _inner_space).join(list(map(_format, _list))).join([_begin + _outer_space, _outer_space + _end])
+
+def imgui_property(text, widget=None, *args):
+    imgui.text_unformatted(text)
+    imgui.next_column()
+    imgui.push_item_width(-1)
+    if widget is not None:
+        result = widget(*args)
+    else:
+        result = None
+    imgui.next_column()
+
+    return result
+
+def imgui_title(text, newline=False):
+    if newline:
+        imgui_property("")
+    imgui.text_colored(text, 0.46, 0.54, 0.8, 1.0)
+    imgui.next_column()
+    imgui.push_item_width(-1)
+    imgui.next_column()
+
+def imgui_properties_start():
+    imgui.columns(2)
+
+def imgui_properties_end():
+    imgui.columns(1)

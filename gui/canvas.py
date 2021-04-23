@@ -6,7 +6,7 @@ import imgui
 import numpy as np
 
 from gui.graphics import Bounds, Point
-from gui.primitives import PrimitiveGroup, Renderable
+from gui.primitives import PrimitiveGroup, Renderable, Primitive
 from misc import util
 from misc.util import ReferenceFactory
 
@@ -63,11 +63,11 @@ class Selection:
 
 class Canvas:
 
-    reference_factory: ReferenceFactory = ReferenceFactory()
     handle_size = 5
 
     def __init__(self, *args, **kwargs):
         super(Canvas, self).__init__(*args, **kwargs)
+        self.reference_factory: ReferenceFactory = ReferenceFactory()
 
         self.primitives: PrimitiveGroup = PrimitiveGroup(0)
 
@@ -106,7 +106,7 @@ class Canvas:
                 _selected: bool = False,
                 _intersected: bool = False,
                 _render_identifiers: bool = False,
-                _render_order: bool = False):
+                _render_order: int = 0):
 
             if isinstance(renderable, PrimitiveGroup):
                 if renderable.identifier == self.selected_group:
@@ -120,9 +120,8 @@ class Canvas:
                     is_intersected = is_in_selected_group and index == self.intersected_renderable
                     render_renderable(child, draw_list, offset, _child_of_selected_group=_child_of_selected_group, _selected=is_selected, _intersected=is_intersected, _render_order=_render_order, _render_identifiers=_render_identifiers)
 
-                if is_in_selected_group:
-                    if _render_order:
-                        self.render_order(renderable, draw_list, offset)
+                if _render_order == 1 and is_in_selected_group or _render_order == 2:
+                    self.render_order(renderable, draw_list, offset)
 
             if not _root:
                 factor = 1.0 if _child_of_selected_group else 0.5
@@ -155,8 +154,8 @@ class Canvas:
 
     def render_order(self, group: PrimitiveGroup, draw_list: Any, offset: Point):
         for index in range(len(group) - 1):
-            p0 = group[index].position()
-            p1 = group[index + 1].position()
+            p0 = group[index].master.position()
+            p1 = group[index + 1].master.position()
             draw_list.add_line(
                 p0.x * self.scale + offset.x,
                 p0.y * -self.scale + offset.y,
@@ -214,8 +213,8 @@ class Canvas:
         self.intersected_point = position
 
         group = self.primitives.find(self.selected_group)
-        if group is None:
-            print("Selected group not found {} {}", self.selected_group, self.primitives.identifier)
+        if group is None or isinstance(group, Primitive):
+            print("Selected group not found {} {}".format(self.selected_group, self.primitives.identifier))
             return
 
         for index, primitive in enumerate(reversed(group)):
@@ -295,6 +294,7 @@ class Canvas:
             primitive = current_group[self.selected_renderables.first()]
             if isinstance(primitive, PrimitiveGroup):
                 current_group.remove(primitive)
+                self.reference_factory.release(primitive.identifier)
                 for child in primitive:
                     current_group.append(child)
             else:
@@ -318,8 +318,11 @@ class Canvas:
             parent = self.primitives.parent(self.selected_group)
             if parent is not None:
                 parent.remove(current_group)
+                self.reference_factory.release(current_group.identifier)
 
         current_group.remove(*selection)
+        for select in selection:
+            self.reference_factory.release(select.identifier)
 
         self.reset_selection()
 
@@ -332,4 +335,9 @@ class Canvas:
         for renderable in self.selected_renderables:
             current_group.append(current_group[renderable].copy(self.reference_factory))
 
+    def selection_to_front(self):
+        group = self.primitives.find(self.selected_group)
+        for primitive in sorted(self.selected_renderables, reverse=True):
+            group.primitives.insert(0, group.primitives.pop(primitive))
 
+        self.reset_selection()

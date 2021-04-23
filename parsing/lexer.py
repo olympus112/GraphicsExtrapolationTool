@@ -48,9 +48,11 @@ class Lexer:
             if character is None:
                 return False
 
-            return character in ['+', '-', '*', '/', '<', '>', '~', '&', '|', '!', '?', ':']
+            return character in ['+', '-', '*', '/', '<', '>', '~', '|', '?']
 
     class Token:
+        Type = int
+
         ERROR = 1
         IDENTIFIER = 2
         LEFTPAREN = 3
@@ -69,11 +71,14 @@ class Lexer:
         EQUAL = 16
         DOLLAR = 17
         SEMICOLON = 18
-        SINGLEQUOTE = 19
-        DOUBLEQUOTE = 20
-        STRING = 21
-        COMMENT = 22
-        END = 23
+        COLON = 19
+        AMPERSAND = 20
+        EXLAMATION = 21
+        SINGLEQUOTE = 22
+        DOUBLEQUOTE = 23
+        STRING = 24
+        COMMENT = 25
+        END = 26
 
         def __init__(self, type: int, start: int, length: int):
             self.type = type
@@ -262,6 +267,12 @@ class Lexer:
             return self.lex_char(Lexer.Token.EQUAL)
         elif character == '$':
             return self.lex_char(Lexer.Token.DOLLAR)
+        elif character == ':':
+            return self.lex_char(Lexer.Token.COLON)
+        elif character == '&':
+            return self.lex_char(Lexer.Token.AMPERSAND)
+        elif character == '!':
+            return self.lex_char(Lexer.Token.EXLAMATION)
         else:
             return self.lex_char(Lexer.Token.ERROR)
 
