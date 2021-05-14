@@ -68,7 +68,10 @@ class PrimitivePattern(InstancePattern):
     def __init__(self, patterns: Dict[Selector, ParameterPattern] = None, identifier: Optional[ReferenceFactory.Reference] = None, arities: Optional[Arities] = None):
         super(PrimitivePattern, self).__init__(identifier)
         self.patterns: Dict[PrimitivePattern.Selector, ParameterPattern] = patterns if patterns is not None else dict()
-        self.arities: PrimitivePattern.Arities = arities
+        if arities is not None:
+            self.arities: PrimitivePattern.Arities = arities
+        else:
+            self.arities = [len(self.patterns)]
 
     def __str__(self) -> str:
         result = ""
@@ -88,12 +91,19 @@ class PrimitivePattern(InstancePattern):
         return result
 
     def dsl(self, _depth: int = 0, _identifier: bool = False, _confidence: bool = False, _tolerance: bool = False) -> str:
+        patterns = dict()
+        for selector, pattern in self.patterns.items():
+            if pattern not in patterns:
+                patterns[pattern] = []
+
+            patterns[pattern].append(selector)
+
         result = "{}{}{}{}".format(
             "\t" * _depth,
             "{}{}".format(default.tokens[default.identifier], self.identifier) if _identifier else "",
             "{}{}".format(default.tokens[default.arities], util.format_list(self.arities, str, "", default.tokens[default.value_separator], "", _inner_space="")) if self.arities is not None else "",
             util.format_list(
-                ["{}{}{}".format(selector, default.tokens[default.selector], pattern.dsl(_confidence, _tolerance)) for selector, pattern in self.patterns.items()],
+                ["{}{}{}".format(util.format_list(selectors, str, '', ',', '', '', ''), default.tokens[default.selector], pattern.dsl(_confidence, _tolerance)) for pattern, selectors in patterns.items()],
                 str,
                 default.tokens[default.primitive_pattern_begin],
                 default.tokens[default.value_separator],
@@ -122,22 +132,25 @@ class PrimitivePattern(InstancePattern):
     """
 
     def next(self, start: Primitive, nths: Union[int, List[int]], named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], reference_factory: ReferenceFactory) -> List[Primitive]:
+        primitives = [(self.patterns[default.name].next(start.name, nth), self.arities[nth % len(self.arities)]) for nth in nths]
+        selectors = { selector for primitive in primitives for selector in named_primitives[primitive]}
+        counts = {}
+        totals = {}
+        for selector in selectors:
+            counts[selector] = [1 if selector in named_primitives[primitive] else 0 for primitive in primitives]
+            totals[selector] = sum(counts[selector])
 
         def next_primitive(nth: int):
-            arity = self.arities[nth % len(self.arities)]
-            parameter_nth = nth - sum(map(lambda x: x < arity, (self.arities * (nth // len(self.arities) + 1))[:nth]))
-
+            name, arity = primitives[nth]
             parameters = [None for _ in range(arity)]
-            name = self.patterns[default.name].next(start.name, nth)
             for selector, pattern in self.patterns.items():
                 if selector == default.name:
                     continue
 
-                key = name, arity
                 if isinstance(selector, int):
                     index = selector
                 else:
-                    selectors = named_primitives[key]
+                    selectors = named_primitives[primitives[nth]]
 
                     if selector not in selectors:
                         continue
@@ -152,6 +165,9 @@ class PrimitivePattern(InstancePattern):
                 else:
                     pattern_start = start[index]
 
+                size = len(counts[selector])
+                div, rem = nth // size, nth % size
+                parameter_nth = totals[selector] * div + sum(counts[selector][:rem])
                 parameters[index] = pattern.next(pattern_start, parameter_nth) if pattern is not None else pattern_start
 
             return Primitive.from_list(reference_factory.new(), name, parameters)
@@ -168,6 +184,7 @@ class GroupPattern(InstancePattern):
         self.intergroup_pattern: PrimitivePattern = pattern
         self.intragroup_patterns: List[InstancePattern] = []
         self.intragroup_sizes: List[int] = []
+        self.intragroup_size_pattern: Optional[ParameterPattern] = None
 
     def __str__(self) -> str:
         result = ""
@@ -204,7 +221,8 @@ class GroupPattern(InstancePattern):
         result = "{}{}{}{}{}{} {}\n{}\n{}".format(
             "\t" * _depth,
             "{}{}".format(default.tokens[default.identifier], self.identifier) if _identifier else "",
-            "{}{}".format(default.tokens[default.sizes], util.format_list(self.intragroup_sizes, str, "", default.tokens[default.value_separator], "", _inner_space="")),
+            # "{}{}".format(default.tokens[default.sizes], util.format_list(self.intragroup_sizes, str, "", default.tokens[default.value_separator], "", _inner_space="")),
+            "{}{}".format(default.tokens[default.sizes], self.intragroup_size_pattern.dsl()),
             default.tokens[default.group_pattern_parent_begin],
             self.intergroup_pattern.dsl(0, _identifier, _confidence, _tolerance),
             default.tokens[default.group_pattern_parent_end],
@@ -224,7 +242,7 @@ class GroupPattern(InstancePattern):
             child.print(depth + 1, _format)
         print("\t" * depth + "}")
 
-    def append(self, *intragroup_patterns: Tuple[InstancePattern, int]):
+    def append(self, *intragroup_patterns: Tuple[InstancePattern, int], _size_pattern: bool = True):
         for intragroup_pattern, intragroup_size in intragroup_patterns:
             if len(self.intragroup_patterns) == 0:
                 self.level = intragroup_pattern.level + 1
@@ -233,6 +251,14 @@ class GroupPattern(InstancePattern):
 
             self.intragroup_patterns.append(intragroup_pattern)
             self.intragroup_sizes.append(intragroup_size)
+
+            self.intragroup_size_pattern = PeriodicPattern.apply(np.array(self.intragroup_sizes), ParameterFlags(self.intragroup_sizes), Tolerance(0, 0), 0)
+            if _size_pattern:
+                for pattern in [ConstantPattern, LinearPattern]:
+                    result = pattern.apply(np.array(self.intragroup_sizes), ParameterFlags(self.intragroup_sizes), Tolerance(0, 0), 0)
+                    if result is not None and result.confidence == 1.0:
+                        self.intragroup_size_pattern = result
+                        break
 
             intragroup_pattern.parent = self
 
@@ -271,7 +297,7 @@ class Pattern:
         return None
 
     @staticmethod
-    def next(start_primitives: List[Primitive], pattern: InstancePattern, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], extrapolations: List[int], reference_factory: ReferenceFactory = ReferenceFactory(), _sizes: bool = True) -> List[Primitive]:
+    def next(start_primitives: List[Primitive], pattern: InstancePattern, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], extrapolations: List[int], reference_factory: ReferenceFactory = ReferenceFactory()) -> List[Primitive]:
         assert pattern.level == len(extrapolations)
 
         extrapolation = extrapolations.pop(0)
@@ -290,19 +316,11 @@ class Pattern:
                 else:
                     new_start_primitives = [start_primitive]
 
-                if _sizes and len(pattern.intragroup_sizes) > 1:
-                    sizes_pattern = LinearPattern.apply(np.array(pattern.intragroup_sizes), ParameterFlags(pattern.intragroup_sizes), Tolerance(0, 0), 0)
-                else:
-                    sizes_pattern = None
-
                 for index, new_start_primitive in enumerate(new_start_primitives):
                     new_extrapolations = extrapolations.copy()
-                    if sizes_pattern is not None:
-                        new_extrapolations[0] += int(sizes_pattern.next(pattern.intragroup_sizes[0], index) - 1)
-                    else:
-                        new_extrapolations[0] += pattern.intragroup_sizes[index % len(pattern.intragroup_sizes)] - 1
+                    new_extrapolations[0] += int(pattern.intragroup_size_pattern.next(pattern.intragroup_sizes[0], index) - 1)
 
-                    result += Pattern.next([new_start_primitive], pattern[index % len(pattern.intragroup_patterns)], named_primitives, new_extrapolations, reference_factory, _sizes)
+                    result += Pattern.next([new_start_primitive], pattern[index % len(pattern.intragroup_patterns)], named_primitives, new_extrapolations, reference_factory)
 
             return result
 
@@ -313,7 +331,7 @@ class Pattern:
             raise Exception()
 
     @staticmethod
-    def search_group_recursive(root: PrimitiveGroup, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], available_patterns: List[ParameterPattern], tolerance: Tolerance, reference_factory: ReferenceFactory, _round: Optional[int] = None) -> Optional[InstancePattern]:
+    def search_group_recursive(root: PrimitiveGroup, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], available_patterns: List[ParameterPattern], tolerance: Tolerance, reference_factory: ReferenceFactory, _round: Optional[int] = None, _size_pattern: bool = True) -> Optional[InstancePattern]:
         if root is None:
             return None
 
@@ -325,7 +343,7 @@ class Pattern:
             if isinstance(instance, Primitive):
                 subpatterns.append((NonePattern(reference_factory.new()), 1))
             elif isinstance(instance, PrimitiveGroup):
-                subpattern = Pattern.search_group_recursive(instance, named_primitives, available_patterns, tolerance, reference_factory, _round)
+                subpattern = Pattern.search_group_recursive(instance, named_primitives, available_patterns, tolerance, reference_factory, _round, _size_pattern)
                 if subpattern is None:
                     return None
 
@@ -335,7 +353,7 @@ class Pattern:
 
         if any(not isinstance(subpattern, NonePattern) for subpattern, _ in subpatterns):
             pattern = GroupPattern(primitive_pattern, reference_factory.new())
-            pattern.append(*subpatterns)
+            pattern.append(*subpatterns, _size_pattern=_size_pattern)
 
         return pattern
 
@@ -364,30 +382,14 @@ class Pattern:
             arity_list = [arity_list[0]]
 
         primitive_pattern = PrimitivePattern(arities=arity_list, identifier=reference_factory.new())
+
         for selector, parameters in parameter_dict.items():
             found_pattern = Pattern.search_parameters(parameters, available_patterns, tolerance, _round)
+
             if found_pattern is None:
                 return NonePattern()
 
             primitive_pattern.append(selector, found_pattern)
-
-        # parameters_list = [[] for _ in range(group.max_arity + 1)]
-        # for primitive in group:
-        #     arity_list.append(primitive.master.arity)
-        #     parameters_list[0].append(primitive.master.name)
-        #     for parameter_index, parameter in enumerate(primitive.master.parameters):
-        #         parameters_list[parameter_index + 1].append(parameter)
-        #
-        # if util.all_same(arity_list, None):
-        #     arity_list = None
-        #
-        # primitive_pattern = PrimitivePattern(arities=arity_list, identifier=reference_factory.new())
-        # for parameters in parameters_list:
-        #     found_pattern = Pattern.search_parameters(parameters, available_patterns, tolerance, _round)
-        #     if found_pattern is None:
-        #         return NonePattern()
-        #
-        #     primitive_pattern.append(found_pattern)
 
         return primitive_pattern
 
@@ -396,20 +398,33 @@ class Pattern:
         parameter_count = len(parameters)
         flags = ParameterFlags(parameters)
 
+        ranked_patterns: List[Tuple[float, ParameterPattern]] = []
         for available_pattern in available_patterns:
             if parameter_count < available_pattern.minimum_parameters():
                 continue
 
             input_parameters = np.array(parameters, flags.dtype)
-            result = available_pattern.apply(input_parameters, flags, tolerance, _round)
+            if not flags.has_str():
+                adjusted_tolerance = Tolerance(np.ptp(input_parameters) * tolerance.absolute, tolerance.relative)
+            else:
+                adjusted_tolerance = default.tolerance
+            result = available_pattern.apply(input_parameters, flags, adjusted_tolerance, _round)
             if result is not None:
-                return result
+                if result.confidence == 100.0:
+                    return result
+                else:
+                    ranked_patterns.append((result.weight() * result.confidence, result))
 
-        return None
+        ranked_patterns.sort(key=lambda pattern: pattern[0], reverse=True)
+
+        if len(ranked_patterns) == 0:
+            return None
+
+        return ranked_patterns[0][1]
 
     @staticmethod
-    def search(start_primitive: Primitive, root: PrimitiveGroup, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], available_patterns: List[ParameterPattern], extrapolations: List[int], tolerance: Tolerance, reference_factory: ReferenceFactory = ReferenceFactory(), _round: Optional[int] = None) -> Tuple[Optional[InstancePattern], Optional[List[Primitive]]]:
-        patterns = Pattern.search_group_recursive(root, named_primitives, available_patterns, tolerance, reference_factory, _round)
+    def search(start_primitive: Primitive, root: PrimitiveGroup, named_primitives: Dict[Tuple[str, int], PrimitivePattern.Selectors], available_patterns: List[ParameterPattern], extrapolations: List[int], tolerance: Tolerance, reference_factory: ReferenceFactory = ReferenceFactory(), _round: Optional[int] = None, _size_pattern: bool = True) -> Tuple[Optional[InstancePattern], Optional[List[Primitive]]]:
+        patterns = Pattern.search_group_recursive(root, named_primitives, available_patterns, tolerance, reference_factory, _round, _size_pattern)
         if patterns is None:
             return None, None
 

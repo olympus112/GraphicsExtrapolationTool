@@ -53,7 +53,7 @@ class Screen:
         self.selected_patterns = [True for _ in self.available_patterns]
         self.render_order = 0
         self.render_identifiers = False
-        self.extract_constants = True
+        self.extract_constants = False
         self.use_sizes = True
 
         self.camera_offset = Point(64 * 4.5, 64 * 2.65)
@@ -282,7 +282,9 @@ class Screen:
 
         util.imgui_title("Misc", True)
         changed, self.round = util.imgui_property("Rounding", imgui.drag_int, "##Round", self.round, 0.1, 0, 10)
+        any_changed |= changed
         changed, self.extract_constants = util.imgui_property("Extract constants", imgui.checkbox, "##constants", self.extract_constants)
+        any_changed |= changed
         changed, self.use_sizes = util.imgui_property("Use sizes", imgui.checkbox, "##sizes", self.use_sizes)
         any_changed |= changed
 
@@ -383,7 +385,8 @@ class Screen:
         _mouse_position_in_canvas = Point(io.mouse_pos.x - origin.x, io.mouse_pos.y - origin.y)
 
         try:
-            self.ocanvas.render(draw_list, origin, render_order=self.render_order)
+            self.ocanvas.render(draw_list, origin, render_order=0)
+            # self.icanvas.render(draw_list, origin, render_order=self.render_order)
         except Exception as error:
             self.handle_error(error)
 
@@ -580,7 +583,7 @@ class Screen:
         self.otext = "\n".join([primitive.dsl() for primitive in self.ocanvas.primitives])
 
     def icanvas_to_found_patterns(self):
-        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.named_primitives, [p for i, p in enumerate(self.available_patterns) if self.selected_patterns[i]], self.tolerance, ReferenceFactory(), _round=None if self.round == 0 else self.round)
+        self.found_patterns = Pattern.search_group_recursive(self.icanvas.primitives, self.named_primitives, [p for i, p in enumerate(self.available_patterns) if self.selected_patterns[i]], self.tolerance, ReferenceFactory(), _round=None if self.round == 0 else self.round, _size_pattern=self.use_sizes)
         if self.found_patterns is not None and len(self.extrapolations) < self.found_patterns.level:
             self.extrapolations.extend([1] * (self.found_patterns.level - len(self.extrapolations)))
 
@@ -611,7 +614,7 @@ class Screen:
             return
 
         try:
-            primitives = Pattern.next([master], self.found_patterns, self.named_primitives, self.extrapolations[:self.found_patterns.level], self.ocanvas.reference_factory, self.use_sizes)
+            primitives = Pattern.next([master], self.found_patterns, self.named_primitives, self.extrapolations[:self.found_patterns.level], self.ocanvas.reference_factory)
 
             for primitive in primitives:
                 if primitive is not None:

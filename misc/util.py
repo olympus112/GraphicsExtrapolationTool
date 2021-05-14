@@ -89,7 +89,7 @@ def equal_tolerant(x: float, y: float, tolerance: Tolerance):
     if tolerance is None:
         return x == y
 
-    return np.isclose(x, y, tolerance.relative, tolerance.absolute)
+    return np.isclose(x, y, rtol=tolerance.relative, atol=tolerance.absolute)
 
 def map_range(x, min_in, max_in, min_out, max_out):
     return (x - min_in) * (max_out - min_out) / (max_in - min_in) + min_out
@@ -119,22 +119,23 @@ def parse_color(color, factor):
         if i == 5:
             return v, p, q
 
+    default_a = 0.5
     if isinstance(color, (Constant, str)):
         if isinstance(color, Constant):
             color = color.name
         colors = {"r": (1.0, 0.0, 0.0), "g": (0.0, 1.0, 0.0), "b": (0.0, 0.0, 1.0)}
         if color in colors:
-            (r, g, b), a = colors[color], 1.0
+            (r, g, b), a = colors[color], default_a
         elif color.startswith("c_"):
             if len(color) == 8:
-                (r, g, b), a = (float(int(color.lstrip("c_")[i:i+2], 16)) / 255.0 for i in (0, 2, 4)), 1.0
+                (r, g, b), a = (float(int(color.lstrip("c_")[i:i+2], 16)) / 255.0 for i in (0, 2, 4)), default_a
             elif len(color) == 10:
                 (r, g, b, a) = (float(int(color.lstrip("c_")[i:i+2], 16)) / 255.0 for i in (0, 2, 4, 6))
     elif isinstance(color, (int, float, np.integer)):
         if color <= 1:
-            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb(color, 1.0, 1.0)]), 1.0
+            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb(color, 1.0, 1.0)]), default_a
         else:
-            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb((color % 360.0) / 360.0, 1.0, 1.0)]), 1.0
+            (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb((color % 360.0) / 360.0, 1.0, 1.0)]), default_a
     else:
         print(color, type(color))
     return imgui.get_color_u32_rgba(r * factor, g * factor, b * factor, a)

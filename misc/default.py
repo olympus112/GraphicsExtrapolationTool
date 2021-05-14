@@ -2,12 +2,30 @@ from misc.util import Tolerance
 from parsing.lexer import Lexer
 
 # Default values
-tolerance = Tolerance(0, 0.1)
+tolerance = Tolerance(0.1, 0)
 confidence = 1.0
 r = 0.4
 g = 0.6
 b = 0.4
-a = 0.8
+a = 0.5
+
+dark = 0
+light = 1
+color = dark
+colors = [
+    {"background": [0.2, 0.2, 0.2, 1.0],
+     "border": [1.0, 1.0, 1.0, 1.0],
+     "cursor": [0.8, 0.8, 0.8, 1.0],
+     "grid": [0.8, 0.8, 0.8, 0.2],
+     "origin": [1.0, 1.0, 1.0, 1.0],
+     "arrow": [0.9, 0.9, 0.9, 1.0]},
+    {"background": [0.945, 0.945, 0.945, 1.0],
+     "border": [0.0, 0.0, 0.0, 1.0],
+     "cursor": [0.2, 0.2, 0.2, 1.0],
+     "grid": [0.2, 0.2, 0.2, 0.2],
+     "origin": [0.0, 0.0, 0.0, 1.0],
+     "arrow": [0.1, 0.1, 0.1, 1.0]}
+]
 
 # Tokens
 tokens = {

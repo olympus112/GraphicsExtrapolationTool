@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 from scipy.optimize import leastsq
+from sklearn.metrics import mean_squared_error
 
 from misc import util, default
 from misc.util import Tolerance
@@ -61,6 +62,9 @@ class ParameterFlags:
 
 
 class ParameterPattern:
+    def __init__(self, confidence: float, tolerance: Tolerance):
+        self.confidence = confidence
+        self.tolerance = tolerance
     @staticmethod
     @abstractmethod
     def name() -> str:
@@ -85,8 +89,10 @@ class ParameterPattern:
         pass
 
     @staticmethod
-    def confidence(parameters: np.ndarray[Primitive.Parameter], true_parameters: np.array, tolerance: Tolerance):
-        return np.exp(-np.sqrt(np.average(np.square((parameters - true_parameters) / tolerance.relative))) / (1.0 + tolerance.relative))
+    def calculate_confidence(parameters: np.ndarray[Primitive.Parameter], true_parameters: np.array, tolerance: Tolerance):
+        mse = mean_squared_error(true_parameters, parameters)
+        normalized_mse = mse / (1.0 + tolerance.absolute)
+        return np.exp(-normalized_mse)
 
     @staticmethod
     def rounded(parameter: Union[Primitive.Parameter, Sequence[Primitive.Parameter]], value: Optional[int] = None):
@@ -98,12 +104,28 @@ class ParameterPattern:
 
         return parameter
 
+    @abstractmethod
+    def weight(self) -> float:
+        pass
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, self.__class__):
+            return self.__dict__ == other.__dict__
+        else:
+            return False
+
+    def __ne__(self, other) -> bool:
+        return not self.__eq__(other)
+
+    @abstractmethod
+    def __hash__(self) -> int:
+        pass
+
 
 class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
     def __init__(self, value: Primitive.Parameter, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        super(ConstantPattern, self).__init__(confidence, tolerance)
         self.value: Primitive.Parameter = value
-        self.confidence: float = confidence
-        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
         return "{}{}{}{}".format(
@@ -119,6 +141,12 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
             self.confidence,
             self.tolerance)
 
+    def __hash__(self):
+        return hash((self.name(), self.value))
+
+    def weight(self) -> float:
+        return 1.8
+
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         return "{}{}{}{}{}{}".format(
             self.name(),
@@ -130,7 +158,7 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
 
     @staticmethod
     def name() -> str:
-        return "Constant"
+        return "cte"
 
     @staticmethod
     def minimum_parameters() -> int:
@@ -152,7 +180,7 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
             confidence = 1.0
         else:
             true_parameters = np.full(parameters.shape, value, dtype=flags.dtype)
-            confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
+            confidence = ParameterPattern.calculate_confidence(parameters, true_parameters, tolerance)
 
         return ConstantPattern(ParameterPattern.rounded(value, _round), confidence, tolerance)
 
@@ -165,10 +193,9 @@ class ConstantPattern(ParameterPattern, metaclass=MPattern.ConstantPattern):
 
 class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
     def __init__(self, start: Primitive.Parameter, delta: Primitive.Parameter, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        super(LinearPattern, self).__init__(confidence, tolerance)
         self.start: Primitive.Parameter = start
         self.delta: Primitive.Parameter = delta
-        self.confidence: float = confidence
-        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
         return "{}{}{}{}{}{}".format(
@@ -186,6 +213,12 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
             self.confidence,
             self.tolerance)
 
+    def __hash__(self):
+        return hash((self.name(), self.start, self.delta))
+
+    def weight(self) -> float:
+        return 1.3
+
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         return "{}{}{}{}{}{}{}".format(
             self.name(),
@@ -198,7 +231,7 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
 
     @staticmethod
     def name() -> str:
-        return "Linear"
+        return "lin"
 
     @staticmethod
     def minimum_parameters() -> int:
@@ -218,7 +251,7 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
             return None
 
         true_parameters = np.array([start + i * value for i in range(len(parameters))])
-        confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
+        confidence = ParameterPattern.calculate_confidence(parameters, true_parameters, tolerance)
 
         return LinearPattern(ParameterPattern.rounded(start, _round), ParameterPattern.rounded(value, _round), confidence, tolerance)
 
@@ -231,9 +264,8 @@ class LinearPattern(ParameterPattern, metaclass=MPattern.LinearPattern):
 
 class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
     def __init__(self, pattern: Primitive.Parameters, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        super(PeriodicPattern, self).__init__(confidence, tolerance)
         self.pattern: Primitive.Parameters = pattern
-        self.confidence: float = confidence
-        self.tolerance: Tolerance = tolerance
 
     def __str__(self):
         return "{}{}".format(
@@ -247,6 +279,12 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
             self.confidence,
             self.tolerance)
 
+    def __hash__(self):
+        return hash((self.name(), tuple(self.pattern)))
+
+    def weight(self) -> float:
+        return 1.2
+
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         return "{}{}{}{}{}{}".format(
             self.name(),
@@ -258,7 +296,7 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
 
     @staticmethod
     def name() -> str:
-        return "Period"
+        return "prd"
 
     @staticmethod
     def minimum_parameters():
@@ -272,7 +310,7 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
             else:
                 return util.equal_tolerant(x, y, tolerance)
 
-        multiplicity = 0
+        multiplicity = 1
         match_index = 0
         pattern: Primitive.Parameters = []
 
@@ -285,13 +323,10 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
                     match_index = 0
 
                 if equal(parameter, pattern[match_index]):
-                    if match_index == 0:
-                        multiplicity += 1
                     match_index += 1
                 else:
-                    pattern += pattern * (multiplicity - 1)
-                    pattern += pattern[:match_index] + [parameter]
-                    multiplicity = 0
+                    pattern = pattern * multiplicity + pattern[:match_index] + [parameter]
+                    multiplicity = 1
                     match_index = 0
 
         if multiplicity == 0:
@@ -299,8 +334,9 @@ class PeriodicPattern(ParameterPattern, metaclass=MPattern.PeriodicPattern):
         elif flags.has_str():
             confidence = 1.0
         else:
-            true_parameters = pattern * multiplicity + pattern[:len(parameters) % len(pattern)]
-            confidence = ParameterPattern.confidence(parameters, true_parameters, tolerance)
+            true_parameters = (pattern * (multiplicity + 1))[:len(parameters)]
+
+            confidence = ParameterPattern.calculate_confidence(parameters, true_parameters, tolerance)
 
         return PeriodicPattern(ParameterPattern.rounded(pattern, _round), confidence, tolerance)
 
@@ -360,10 +396,9 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
     zero_unsafe_operations = [Operator.Min, Operator.Plus, Operator.Div, Operator.Mul]
 
     def __init__(self, operators: Operator.Operators, values: Primitive.Parameters, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        super(BFSOperatorPattern, self).__init__(confidence, tolerance)
         self.operators: Operator.Operators = operators
         self.values: Primitive.Parameters = values
-        self.confidence: float = confidence
-        self.tolerance: Tolerance = tolerance
         self._cache: List[float] = []
 
     def __str__(self) -> str:
@@ -379,6 +414,12 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             self.confidence,
             self.tolerance)
 
+    def __hash__(self):
+        return hash((self.name(), tuple(self.values), tuple(self.operators)))
+
+    def weight(self) -> float:
+        return 1.1
+
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         return "{}{}{}{}{}{}".format(
             self.name(),
@@ -390,7 +431,7 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
 
     @staticmethod
     def name() -> str:
-        return "Operator"
+        return "op"
 
     @staticmethod
     def minimum_parameters() -> int:
@@ -403,11 +444,11 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
 
         def validate(pattern: BFSOperatorPattern) -> bool:
             parameter_reference = original_parameters
-            parameter_min = parameter_reference.min()
-            parameter_max = parameter_reference.max()
+            parameter_min = parameter_reference.min(initial=0)
+            parameter_max = parameter_reference.max(initial=0)
             n_start = len(parameter_reference)
             n_delta = 5
-            tol = 1.0
+            tol = 1.5
             for extrapolation in range(n_start, n_start + n_delta):
                 parameter_range = parameter_max - parameter_min
 
@@ -447,7 +488,7 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
                 continue
 
             if util.all_same(new_parameters, tolerance):
-                confidence = ParameterPattern.confidence(new_parameters, np.full(new_parameters.shape, new_parameters[0], flags.dtype), tolerance)
+                confidence = ParameterPattern.calculate_confidence(new_parameters, np.full(new_parameters.shape, new_parameters[0], flags.dtype), tolerance)
                 operators, values = expand_history(history, None, new_parameters[0])
 
                 pattern = BFSOperatorPattern(operators, ParameterPattern.rounded(values, _round), confidence, tolerance)
@@ -487,12 +528,11 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
 
 class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
     def __init__(self, amplitude: float, frequency: float, phase: float, mean: float, confidence: float = default.confidence, tolerance: Tolerance = default.tolerance):
+        super(SinusoidalPattern, self).__init__(confidence, tolerance)
         self.amplitude: float = amplitude
         self.frequency: float = frequency
         self.phase: float = phase
         self.mean: float = mean
-        self.confidence: float = confidence
-        self.tolerance: Tolerance = tolerance
 
     def __str__(self) -> str:
         return "{}{}".format(
@@ -509,6 +549,12 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
             self.confidence,
             self.tolerance)
 
+    def __hash__(self):
+        return hash((self.name(), self.amplitude, self.frequency, self.phase, self.mean))
+
+    def weight(self) -> float:
+        return 1.0
+
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
         return "{}{}{}{}{}{}{}{}{}".format(
             self.name(),
@@ -523,7 +569,7 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
 
     @staticmethod
     def name() -> str:
-        return "Sinus"
+        return "sine"
 
     @staticmethod
     def minimum_parameters() -> int:
@@ -541,7 +587,9 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
         guess_freq = 1
         guess_amp = 1
         est_amp, est_freq, est_phase, est_mean = leastsq(lambda x: x[0] * np.sin(x[1] * t + x[2]) + x[3] - parameters, np.array([guess_amp, guess_freq, guess_phase, guess_mean]))[0]
-        confidence = 1.0
+        true_sine = lambda x : est_amp * np.sin(est_freq * x + est_phase) + est_mean
+        true_parameters = true_sine(t)
+        confidence = ParameterPattern.calculate_confidence(parameters, true_parameters, tolerance)
 
         return SinusoidalPattern(ParameterPattern.rounded(est_amp, _round), ParameterPattern.rounded(est_freq, _round), ParameterPattern.rounded(est_phase, _round), ParameterPattern.rounded(est_mean, _round), confidence, tolerance)
 

@@ -38,12 +38,36 @@ class PatternTests(TestCase):
 
     def test_bfs(self):
         # numbers = np.array([3, 7, 15, 31])
-        numbers = np.array([2, 3, 6, 15])
-        result = BFSOperatorPattern.apply(numbers, ParameterFlags(numbers), tolerance=0)
+        # numbers = np.array([2, 3, 6, 15])
+        numbers = np.array([1, 2, 0, 3, -1, 4])
+        result = BFSOperatorPattern.apply(numbers, ParameterFlags(numbers))
         print(result)
+        print(result.next(3, 0))
+        print(result.next(3, 1))
         print(result.next(3, 2))
 
-    def test_period(self):
-        numbers = np.array([2, 3, 4, 2])
-        result = PeriodicPattern.apply(numbers, ParameterFlags(numbers))
+    def test_cte(self):
+        numbers = np.array([275, 200, 275])
+        result = ConstantPattern.apply(numbers, ParameterFlags(numbers), Tolerance(0.2 * np.ptp(numbers), 0))
         print(result)
+
+    def test_period(self):
+        # numbers = np.array(["rect", "rect", "rect", "vector"])
+        numbers = np.array([275.0, 200.0, 275.0])
+
+        result = PeriodicPattern.apply(numbers, ParameterFlags(numbers), Tolerance(0.2 * np.ptp(numbers), 0.1))
+        print(result)
+
+    def test_sine(self):
+        numbers = np.array([1, 4, 1, -2])
+        result = SinusoidalPattern.apply(numbers, ParameterFlags(numbers))
+        print(result)
+
+    def test_equal(self):
+        a = PeriodicPattern([1, 2])
+        b = PeriodicPattern([1, 2])
+        print(a == b)
+
+        a = ConstantPattern(50.000)
+        b = ConstantPattern(50.0)
+        print(a == b)

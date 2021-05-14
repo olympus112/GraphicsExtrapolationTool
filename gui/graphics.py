@@ -122,4 +122,4 @@ class Bounds:
                            self.min.y * -scale + offset.y + margin,
                            self.max.x * scale + offset.x + margin,
                            self.max.y * -scale + offset.y - margin,
-                           imgui.get_color_u32_rgba(0.9 * factor, 0.9 * factor, 0.9 * factor, 1.0))
+                           imgui.get_color_u32_rgba(1.0 * factor, 1.0 * factor, 1.0 * factor, 1.0))

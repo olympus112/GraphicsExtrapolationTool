@@ -7,7 +7,7 @@ import numpy as np
 
 from gui.graphics import Bounds, Point
 from gui.primitives import PrimitiveGroup, Renderable, Primitive
-from misc import util
+from misc import util, default
 from misc.util import ReferenceFactory
 
 
@@ -161,7 +161,7 @@ class Canvas:
                 p0.y * -self.scale + offset.y,
                 p1.x * self.scale + offset.x,
                 p1.y * -self.scale + offset.y,
-                imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
+                imgui.get_color_u32_rgba(*default.colors[default.color]["arrow"]))
 
             direction = p1 - p0
             length = direction.length()
@@ -174,26 +174,26 @@ class Canvas:
                 [(p1.x - direction.y - 2 * direction.x) * self.scale + offset.x, (p1.y + direction.x - 2 * direction.y) * -self.scale + offset.y],
                 [(p1.x + direction.y - 2 * direction.x) * self.scale + offset.x, (p1.y - direction.x - 2 * direction.y) * -self.scale + offset.y]
             ])
-            draw_list.add_convex_poly_filled(points, imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0))
+            draw_list.add_convex_poly_filled(points, imgui.get_color_u32_rgba(*default.colors[default.color]["arrow"]))
 
 
     def render_grid(self, draw_list, offset: Point, position_min: Point, position_max: Point, grid_step=64):
         for x in util.frange(math.fmod(offset.x, grid_step * self.scale), position_max.x - position_min.x, grid_step * self.scale):
-            color = imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 0.2)
+            color = imgui.get_color_u32_rgba(*default.colors[default.color]["grid"])
             if offset.x == x:
-                color = imgui.get_color_u32_rgba(1, 1, 1, 1)
+                color = imgui.get_color_u32_rgba(*default.colors[default.color]["origin"])
             draw_list.add_line(position_min.x + x, position_min.y, position_min.x + x, position_max.y, color)
         for y in util.frange(math.fmod(offset.y, grid_step * self.scale), position_max.y - position_min.y, grid_step * self.scale):
-            color = imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 0.2)
+            color = imgui.get_color_u32_rgba(*default.colors[default.color]["grid"])
             if offset.y == y:
-                color = imgui.get_color_u32_rgba(1, 1, 1, 1)
+                color = imgui.get_color_u32_rgba(*default.colors[default.color]["origin"])
             draw_list.add_line(position_min.x, position_min.y + y, position_max.x, position_min.y + y, color)
 
     def render_canvas(self, draw_list: Any, position_min: Point, position_max: Point):
         draw_list.add_rect_filled(position_min.x, position_min.y, position_max.x, position_max.y,
-                                  imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 1.0))
+                                  imgui.get_color_u32_rgba(*default.colors[default.color]["background"]))
         draw_list.add_rect(position_min.x, position_min.y, position_max.x, position_max.y,
-                           imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0))
+                           imgui.get_color_u32_rgba(*default.colors[default.color]["background"]))
 
     def render_cursor(self, draw_list: Any, position: Point):
         offset = 8
@@ -201,12 +201,12 @@ class Canvas:
                                   position.y - offset / 5.0,
                                   position.x + offset,
                                   position.y + offset / 5.0,
-                                  imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0))
+                                  imgui.get_color_u32_rgba(*default.colors[default.color]["cursor"]))
         draw_list.add_rect_filled(position.x - offset / 5.0,
                                   position.y - offset,
                                   position.x + offset / 5.0,
                                   position.y + offset,
-                                  imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0))
+                                  imgui.get_color_u32_rgba(*default.colors[default.color]["cursor"]))
 
     def mouse_move(self, position: Point):
         self.intersected_renderable = None

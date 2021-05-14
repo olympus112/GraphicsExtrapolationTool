@@ -45,13 +45,14 @@ class PatternParser:
 
         self.variables[name] = value
 
-    def parse_sequence(self, start_type: Lexer.Token.Type, token: Lexer.Token, _parse_sequence: bool) -> Tuple[Optional[List[int]], Lexer.Token]:
-        if not _parse_sequence or token.type != start_type:
-            return None, token
+    def parse_sequence(self, start_type: Optional[Lexer.Token.Type], end_type: Lexer.Token.Type, token: Lexer.Token) -> Tuple[Optional[List[Union[int, str]]], Lexer.Token]:
+        if start_type is not None:
+            if token.type != start_type:
+                return None, token
 
-        sequence: List[int] = []
+            token = self.lexer.next()
 
-        token = self.lexer.next()
+        sequence: List[Union[int, str]] = []
         types = { Lexer.Token.INT, Lexer.Token.IDENTIFIER }
         while token.type != Lexer.Token.END:
             if token.type not in types:
@@ -61,16 +62,24 @@ class PatternParser:
                 value = self.lexer.str(token)
                 value = self.substitute_variable(value)
 
-                sequence.append(int(value))
+                def check_int(s):
+                    if s[0] in ('-', '+'):
+                        return s[1:].isdigit()
+                    return s.isdigit()
 
-                types = { default.value_separator, default.primitive_pattern_begin }
+                if check_int(value):
+                    sequence.append(int(value))
+                else:
+                    sequence.append(value)
+
+                types = { default.value_separator, end_type }
             elif token.type == Lexer.Token.INT:
                 sequence.append(int(self.lexer.str(token)))
 
-                types = { default.value_separator, default.primitive_pattern_begin }
+                types = { default.value_separator, end_type }
             elif token.type == default.value_separator:
                 types = { Lexer.Token.INT, Lexer.Token.IDENTIFIER }
-            elif token.type == default.primitive_pattern_begin:
+            elif token.type == end_type:
                 return sequence, token
             else:
                 return None, token
@@ -104,16 +113,12 @@ class PatternParser:
             return self.parse_instance_pattern(self.lexer.next(), reference_factory, _parse_identifier)
 
         identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier=_parse_identifier)
-        arities, token = self.parse_sequence(default.arities, token, _parse_sequence=True)
-        sizes, token = self.parse_sequence(default.sizes, token, _parse_sequence=True)
 
-        if token.type == default.group_pattern_parent_begin:
-            pattern = self.parse_group_pattern(token, reference_factory, _parse_sizes=False, _parse_identifier=False)
-            pattern.intragroup_sizes = sizes
-        elif token.type == default.primitive_pattern_begin:
-            pattern = self.parse_primitive_pattern(token, reference_factory, _parse_arities=False, _parse_identifier=False)
-            pattern.arities = arities
-        elif token.type == identifier and self.lexer.str(token) == default.none:
+        if token.type == default.sizes:
+            pattern = self.parse_group_pattern(token, reference_factory, _parse_identifier=False)
+        elif token.type == default.arities:
+            pattern = self.parse_primitive_pattern(token, reference_factory, _parse_identifier=False)
+        elif token.type == Lexer.Token.IDENTIFIER and self.lexer.str(token) == default.none:
             return NonePattern()
         else:
             pattern = None
@@ -123,10 +128,16 @@ class PatternParser:
 
         return pattern
 
-    def parse_group_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_sizes: bool = False, _parse_identifier: bool = True) -> Optional[GroupPattern]:
+    def parse_group_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_identifier: bool = True) -> Optional[GroupPattern]:
         identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier)
-        sizes, token = self.parse_sequence(default.sizes, token, _parse_sequence=_parse_sizes)
 
+        if token.type != default.sizes:
+            return None
+
+        token = self.lexer.next()
+        size_pattern = self.parse_parameter_pattern(token)
+
+        token = self.lexer.next()
         if token.type != default.group_pattern_parent_begin:
             return None
 
@@ -146,21 +157,24 @@ class PatternParser:
         patterns: List[InstancePattern] = []
 
         token = self.lexer.next()
-        types = { default.primitive_pattern_begin, default.group_pattern_parent_begin, default.identifier, default.group_pattern_children_end }
+        types = { default.arities, default.sizes, default.identifier, Lexer.Token.IDENTIFIER, default.group_pattern_children_end }
         while token.type != Lexer.Token.END:
             if token.type not in types:
                 return None
 
-            if token.type == default.primitive_pattern_begin or token.type == default.group_pattern_parent_begin or token.type == default.identifier:
+            if token.type == default.sizes or token.type == default.arities or token.type == default.identifier:
                 pattern = self.parse_instance_pattern(token, reference_factory, _parse_identifier=True)
                 patterns.append(pattern)
 
                 types = { default.value_separator, default.group_pattern_children_end }
+            elif token.type == Lexer.Token.IDENTIFIER and self.lexer.str(token) == default.none:
+                patterns.append(NonePattern())
+                types = {default.value_separator, default.group_pattern_children_end}
             elif token.type == default.value_separator:
-                types = { default.primitive_pattern_begin, default.group_pattern_parent_begin, default.identifier }
+                types = { default.arities, default.sizes, default.identifier, Lexer.Token.IDENTIFIER }
             elif token.type == default.group_pattern_children_end:
                 pattern = GroupPattern(parent, identifier=identifier)
-                pattern.append(*zip(patterns, sizes))
+                pattern.append(*zip(patterns, [size_pattern.next(None, i) for i in range(len(patterns))]))
 
                 return pattern
             else:
@@ -170,7 +184,9 @@ class PatternParser:
 
     def parse_primitive_pattern(self, token: Lexer.Token, reference_factory: ReferenceFactory, _parse_identifier: bool = True, _parse_arities: bool = True) -> Optional[PrimitivePattern]:
         identifier, token = self.parse_identifier(token, reference_factory, _parse_identifier=_parse_identifier)
-        arities, token = self.parse_sequence(default.arities, token, _parse_sequence=_parse_arities)
+        arities, token = self.parse_sequence(default.arities, default.primitive_pattern_begin, token)
+        if arities is None:
+            return None
 
         if token.type != default.primitive_pattern_begin:
             return None
@@ -184,10 +200,8 @@ class PatternParser:
                 return None
 
             if token.type == Lexer.Token.IDENTIFIER or token.type == Lexer.Token.INT:
-                selector = self.lexer.str(token)
-                selector = int(selector) if token.type == Lexer.Token.INT else selector
+                selectors, token = self.parse_sequence(None, default.selector, token)
 
-                token = self.lexer.next()
                 if token.type != default.selector:
                     return None
 
@@ -196,7 +210,8 @@ class PatternParser:
                     return None
 
                 pattern = self.parse_parameter_pattern(token)
-                patterns[selector] = pattern
+                for selector in selectors:
+                    patterns[selector] = pattern
 
                 types = { default.value_separator, default.primitive_pattern_end }
             elif token.type == default.value_separator:
@@ -218,7 +233,7 @@ class PatternParser:
         parameters: Primitive.Parameters = []
 
         token = self.lexer.next()
-        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, default.parameter_pattern_end }
+        types = { Lexer.Token.STRING, Lexer.Token.INT, Lexer.Token.FLOAT, Lexer.Token.IDENTIFIER, Lexer.Token.OPERATOR, default.parameter_pattern_end }
         while token.type != Lexer.Token.END:
             if token.type not in types:
                 return None
@@ -229,6 +244,14 @@ class PatternParser:
                 parameters.append(identifier)
 
                 types = { default.value_separator, default.parameter_pattern_end }
+            elif token.type == Lexer.Token.OPERATOR:
+                string = self.lexer.str(token)
+                if string not in ['+', '-', '*', '/']:
+                    return None
+
+                parameters.append(string)
+                types = {default.value_separator, default.parameter_pattern_end}
+
             elif token.type == Lexer.Token.FLOAT:
                 parameters.append(float(self.lexer.str(token)))
 
@@ -246,7 +269,7 @@ class PatternParser:
 
                 types = { default.value_separator, default.parameter_pattern_end }
             elif token.type == default.value_separator:
-                types = { Lexer.Token.FLOAT, Lexer.Token.INT, Lexer.Token.IDENTIFIER, Lexer.Token.STRING }
+                types = { Lexer.Token.FLOAT, Lexer.Token.INT, Lexer.Token.IDENTIFIER, Lexer.Token.OPERATOR, Lexer.Token.STRING }
             elif token.type == default.parameter_pattern_end:
                 break
             else:

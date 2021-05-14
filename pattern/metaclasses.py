@@ -47,25 +47,25 @@ class MOperator:
             return repr(self)
 
         def __repr__(self):
-            return "plus"
+            return "+"
 
     class Min(type):
         def __str__(self):
             return repr(self)
 
         def __repr__(self):
-            return "min"
+            return "-"
 
     class Mul(type):
         def __str__(self):
             return repr(self)
 
         def __repr__(self):
-            return "mul"
+            return "*"
 
     class Div(type):
         def __str__(self):
             return repr(self)
 
         def __repr__(self):
-            return "div"
+            return "/"
