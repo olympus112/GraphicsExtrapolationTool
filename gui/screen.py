@@ -14,7 +14,6 @@ from parsing.pattern_parser import PatternParser
 from parsing.primitive_parser import PrimitiveParser
 from pattern.pattern import *
 
-
 class Screen:
     def __init__(self, title, width, height):
         super(Screen, self).__init__()
@@ -295,6 +294,9 @@ class Screen:
 
         util.imgui_properties_end()
 
+        if imgui.button("Tikz"):
+            self.tikz()
+
         if any_changed:
             self.icanvas_to_all()
 
@@ -548,7 +550,7 @@ class Screen:
                 self.ocanvas.scale = new_scale
             else:
                 depth = self.icanvas.primitives.depth(self.icanvas.selected_group)
-                if depth is not None:
+                if depth is not None and len(self.extrapolations) > depth:
                     self.extrapolations[depth] = int(max(0, self.extrapolations[depth] + imgui.get_io().mouse_wheel))
 
             self.found_patterns_to_ocanvas()
@@ -697,3 +699,13 @@ class Screen:
             new_var_code += "${} = {}\n".format(variable, value)
 
         return new_var_code + string
+
+    def tikz(self):
+        from tkinter import Tk
+        r = Tk()
+        r.withdraw()
+        r.clipboard_clear()
+        result = "\\resizebox{1.0\\textwidth}{!}{\n\t\\begin{tikzpicture}\n\t\t" + "\n\t\t".join([primitive.tikz() for primitive in self.ocanvas.primitives]) + "\n\t\\end{tikzpicture}\n}"
+        r.clipboard_append(result)
+        r.update()  # now it stays on the clipboard after the window is closed
+        r.destroy()

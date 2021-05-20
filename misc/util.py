@@ -95,6 +95,11 @@ def map_range(x, min_in, max_in, min_out, max_out):
     return (x - min_in) * (max_out - min_out) / (max_in - min_in) + min_out
 
 def parse_color(color, factor):
+    r, g, b, a = parse_color_rgba(color, factor)
+
+    return imgui.get_color_u32_rgba(r * factor, g * factor, b * factor, a)
+
+def parse_color_rgba(color, factor):
     r, g, b, a = 1.0, 1.0, 1.0, 1.0
 
     def hsv_to_rgb(h, s, v):
@@ -138,8 +143,8 @@ def parse_color(color, factor):
             (r, g, b), a = tuple([x / 255.0 for x in hsv_to_rgb((color % 360.0) / 360.0, 1.0, 1.0)]), default_a
     else:
         print(color, type(color))
-    return imgui.get_color_u32_rgba(r * factor, g * factor, b * factor, a)
 
+    return r, g, b, a
 def print_methods(obj):
     print([method_name for method_name in dir(obj) if callable(getattr(obj, method_name))])
 

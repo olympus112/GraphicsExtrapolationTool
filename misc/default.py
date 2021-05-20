@@ -7,7 +7,7 @@ confidence = 1.0
 r = 0.4
 g = 0.6
 b = 0.4
-a = 0.5
+a = 1.0
 
 dark = 0
 light = 1

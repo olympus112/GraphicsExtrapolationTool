@@ -523,7 +523,10 @@ class BFSOperatorPattern(ParameterPattern, metaclass=MPattern.OperatorPattern):
             # if j >= len(self._cache):
             #     self._cache.append(values[0])
 
-        return values[0]
+        if start is None:
+            return values[0]
+
+        return start + values[0]
 
 
 class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
@@ -556,13 +559,10 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
         return 1.0
 
     def dsl(self, _confidence: bool = False, _tolerance: bool = False) -> str:
-        return "{}{}{}{}{}{}{}{}{}".format(
+        return "{}{}{}{}{}{}".format(
             self.name(),
             default.tokens[default.parameter_pattern_begin],
-            self.amplitude,
-            self.frequency,
-            self.phase,
-            self.mean,
+            util.format_list([self.amplitude, self.frequency, self.phase, self.mean], str, '', default.tokens[default.value_separator], ''),
             "{} {}".format(default.tokens[default.value_separator], self.confidence) if _confidence else "",
             "{} {}".format(default.tokens[default.value_separator], self.tolerance) if _tolerance else "",
             default.tokens[default.parameter_pattern_end])
@@ -594,7 +594,10 @@ class SinusoidalPattern(ParameterPattern, metaclass=MPattern.SinusoidalPattern):
         return SinusoidalPattern(ParameterPattern.rounded(est_amp, _round), ParameterPattern.rounded(est_freq, _round), ParameterPattern.rounded(est_phase, _round), ParameterPattern.rounded(est_mean, _round), confidence, tolerance)
 
     def next(self, start: Optional[Primitive.Parameter], nth: int) -> Primitive.Parameter:
-        return self.amplitude * math.sin(self.frequency * nth + self.phase) + self.mean
+        if start is None:
+            return self.amplitude * math.sin(self.frequency * nth + self.phase) + self.mean
+
+        return start + self.amplitude * math.sin(self.frequency * nth + self.phase) + self.mean
 
 
 # class ILPPattern:

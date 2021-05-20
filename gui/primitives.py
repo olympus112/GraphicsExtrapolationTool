@@ -286,6 +286,8 @@ class PrimitiveGroup(Renderable):
     def render(self, draw_list: Any, offset: Point, scale: float, factor: float = 1.0):
         self.bounds().render(draw_list, offset, scale, factor, 10)
 
+    def tikz(self):
+        return "\n".join([primitive.tikz() for primitive in self.primitives])
 
 class Rect(Primitive):
     width = 50
@@ -367,6 +369,26 @@ class Rect(Primitive):
                                   (self[1] + height / 2.0) * -scale + offset.y,
                                   color)
 
+    def tikz(self) -> str:
+        if self.arity == 5:
+            r, g, b, a = parse_color_rgba(self[4], 1.0)
+        else:
+            r, g, b, a = default.r, default.g, default.b, default.a
+
+        def f(c):
+            return min(max(0, int(c * 255.0)), 255)
+
+        bounds = self.bounds()
+        return "\\draw [fill={{rgb, 255: red, {}; green, {}; blue, {}}}, draw opacity={}] ({}, {}) rectangle ({}, {});".format(
+            f(r),
+            f(g),
+            f(b),
+            a,
+            bounds.min_x(),
+            bounds.min_y(),
+            bounds.max_x(),
+            bounds.max_y()
+        )
 
 class Line(Primitive):
 
@@ -422,6 +444,26 @@ class Line(Primitive):
                            self[3] * -scale + offset.y,
                            color)
 
+    def tikz(self):
+        if self.arity == 5:
+            r, g, b, a = parse_color_rgba(self[4], 1.0)
+        else:
+            r, g, b, a = default.r, default.g, default.b, default.a
+
+        def f(c):
+            return min(max(0, int(c * 255.0)), 255)
+
+        bounds = self.bounds()
+        return "\\draw [color={{rgb, 255: red, {}; green, {}; blue, {}}}, draw opacity={}] ({}, {}) -- ({}, {});".format(
+            f(r),
+            f(g),
+            f(b),
+            a,
+            bounds.min_x(),
+            bounds.min_y(),
+            bounds.max_x(),
+            bounds.max_y()
+        )
 
 class Vector(Primitive):
 
@@ -474,6 +516,25 @@ class Vector(Primitive):
                            self[1] * -scale + self[3] * math.sin(math.radians(self[2])) * -scale + offset.y,
                            color)
 
+    def tikz(self):
+        if self.arity == 5:
+            r, g, b, a = parse_color_rgba(self[4], 1.0)
+        else:
+            r, g, b, a = default.r, default.g, default.b, default.a
+
+        def f(c):
+            return min(max(0,int(c * 255.0)), 256)
+
+        return "\\draw [-{{Triangle[width=8,length=10]}}][color={{rgb, 255: red, {}; green, {}; blue, {}}}, draw opacity={}] ({}, {}) -- ({}, {});".format(
+            f(r),
+            f(g),
+            f(b),
+            a,
+            self.position().x,
+            self.position().y,
+            self[0] + self[3] * math.cos(math.radians(self[2])),
+            self[1] + self[3] * math.sin(math.radians(self[2]))
+        )
 
 class Circle(Primitive):
     radius = 25
@@ -537,3 +598,27 @@ class Circle(Primitive):
                                     radius * scale,
                                     color,
                                     30)
+
+    def tikz(self):
+        if self.arity == 4:
+            r, g, b, a = parse_color_rgba(self[3], 1.0)
+        else:
+            r, g, b, a = default.r, default.g, default.b, default.a
+
+        def f(c):
+            return min(max(0,int(c * 255.0)), 255)
+
+        if self.arity < 3:
+            radius = 25
+        else:
+            radius = self[2]
+
+        return "\\draw [fill={{rgb, 255: red, {}; green, {}; blue, {}}}, draw opacity={}] ({}, {}) circle ({});".format(
+            f(r),
+            f(g),
+            f(b),
+            a,
+            self.position().x,
+            self.position().y,
+            radius
+        )

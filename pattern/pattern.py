@@ -149,18 +149,20 @@ class PrimitivePattern(InstancePattern):
 
                 if isinstance(selector, int):
                     index = selector
+
+                    if index >= arity:
+                        continue
                 else:
                     selectors = named_primitives[primitives[nth]]
-
                     if selector not in selectors:
                         continue
 
                     index = selectors.index(selector)
+                    if index >= arity:
+                        continue
 
-                if index >= arity:
-                    continue
-
-                if index >= start.arity:
+                start_selectors = named_primitives[(start.name, start.arity)]
+                if index >= start.arity or selector not in start_selectors:
                     pattern_start = None
                 else:
                     pattern_start = start[index]
@@ -378,8 +380,11 @@ class Pattern:
 
             parameter_dict[default.name].append(primitive.master.name)
 
-        if util.all_same(arity_list, None) and len(arity_list) > 0:
-            arity_list = [arity_list[0]]
+        if len(arity_list) > 0:
+            flags = ParameterFlags(arity_list)
+            arity_pattern: Optional[PeriodicPattern] = PeriodicPattern.apply(np.array(arity_list, dtype=flags.dtype), flags)
+            if arity_pattern is not None:
+                arity_list = [int(i) for i in arity_pattern.pattern]
 
         primitive_pattern = PrimitivePattern(arities=arity_list, identifier=reference_factory.new())
 
@@ -410,6 +415,7 @@ class Pattern:
                 adjusted_tolerance = default.tolerance
             result = available_pattern.apply(input_parameters, flags, adjusted_tolerance, _round)
             if result is not None:
+                # return result
                 if result.confidence == 100.0:
                     return result
                 else:
