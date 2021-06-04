@@ -1,3 +1,4 @@
+import timeit
 from unittest import TestCase
 
 from parsing.primitive_parser import PrimitiveParser
@@ -71,3 +72,22 @@ class PatternTests(TestCase):
         a = ConstantPattern(50.000)
         b = ConstantPattern(50.0)
         print(a == b)
+
+    def test(self):
+        patterns = [ConstantPattern, LinearPattern, BFSOperatorPattern, PeriodicPattern, SinusoidalPattern]
+        numbers = [1 ,1.1, 0.9 ,1]
+        def f():
+            return BFSOperatorPattern.apply(np.array(numbers), ParameterFlags(numbers), Tolerance(0.2, 0))
+        print(timeit.timeit(f, number=1000))
+        print(f())
+     #   print(Pattern.search_parameters(numbers, patterns, Tolerance(0, 0)))
+
+# 1, 2, 3, 4, 5, 6: lin(1,1.0) 0.000174696 -> f(A,B):-my_succ(A,B). 0.001s
+# 1 1.1 0.9 1: cte(1) 0.000153 -> None timeout
+# 1, 2, 4, 8, 16: op(/, 1, 2.0) 0.000461 -> 0.001s
+# 1, 3, 7, 13, 21: op(-, -, 1, 2, 2) .00054764 -> 0.068
+# 1, 2, 4, 11, 67, 2279: None 0.01207 -> 0.244
+# 0, -0.5, 1, 7.5, 22, 47.5: op(-, -, -, 0.0, -0.5, 2.0, 3.0) 0.000848 -> 1.088
+# f(A,B):-f_1(A,C),my_negate(C,B).
+# f_1(A,B):-my_half(A,C),f_2(A,D),my_mul(C,D,B).
+# f_2(A,B):-my_succ(A,C),my_square(A,D),my_min(C,D,B).
